@@ -1,4 +1,5 @@
 // Types and calls for the backend (FastAPI) JSON API. Keep in sync with backend/app/schemas.py.
+import { lang } from "@/lib/i18n";
 
 export type AttachmentState = "active" | "deleted_by_vault" | "missing_in_jira" | "restored";
 export type JobStatus = "pending_approval" | "approved" | "running" | "done" | "failed" | "cancelled";
@@ -50,6 +51,16 @@ export interface Job {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface JobLogLine {
+  id: number;
+  at: string;
+  level: "info" | "warn" | "error";
+  event: string;
+  attachment_id: string | null;
+  issue_key: string | null;
+  data: Record<string, any> | null;
 }
 
 export interface Totals {
@@ -189,9 +200,12 @@ export const api = {
   backupUrl: (id: string) => `/api/attachments/${id}/backup`,
   cleanupPreview: (p: Policy) => request<CleanupPreview>("POST", "/cleanup/preview", p),
   cleanupCreate: (p: Policy) => request<Job>("POST", "/cleanup/jobs", p),
+  cleanupManual: (ids: string[], skipEmbedded: boolean) =>
+    request<Job>("POST", "/cleanup/manual", { attachment_ids: ids, skip_embedded: skipEmbedded }),
   jobs: () => request<Job[]>("GET", "/jobs"),
+  jobLog: (id: number) => request<JobLogLine[]>("GET", `/jobs/${id}/log`),
   job: (id: number) => request<{ job: Job; items: Attachment[]; total_bytes: number }>("GET", `/jobs/${id}`),
-  approve: (id: number) => request<Job>("POST", `/jobs/${id}/approve`),
+  approve: (id: number) => request<Job>("POST", `/jobs/${id}/approve?lang=${lang}`),
   cancel: (id: number) => request<Job>("POST", `/jobs/${id}/cancel`),
   sync: (full: boolean) => request<Job>("POST", "/sync", { full }),
   audit: () => request<AuditEntry[]>("GET", "/audit"),

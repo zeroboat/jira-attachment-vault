@@ -50,6 +50,16 @@ class AuditOut(_Out):
     detail: dict[str, Any] | None
 
 
+class JobLogOut(_Out):
+    id: int
+    at: datetime
+    level: str
+    event: str
+    attachment_id: str | None
+    issue_key: str | None
+    data: dict[str, Any] | None
+
+
 class JobOut(_Out):
     id: int
     kind: str
@@ -132,6 +142,11 @@ class JobDetail(BaseModel):
     job: JobOut
     items: list[AttachmentOut]
     total_bytes: int
+
+
+class ManualCleanupIn(BaseModel):
+    attachment_ids: list[str] = Field(min_length=1, max_length=5000)
+    skip_embedded: bool = True
 
 
 class LoginIn(BaseModel):

@@ -138,6 +138,11 @@ def test_full_flow():
         assert "big.log" in ops_text and "screen.png" not in ops_text and "#" + str(job.id) in ops_text
         assert s.get(Attachment, "100").state == DELETED_BY_VAULT
         assert s.get(Attachment, "103").state == ACTIVE
+        from app.db import JobLog
+        events = [(l.event, l.attachment_id) for l in s.query(JobLog).filter_by(job_id=job.id).order_by(JobLog.id)]
+        assert events[0][0] == "cleanup_started" and events[-1][0] == "job_done", events
+        assert ("skipped", "103") in events and ("deleted", "100") in events
+        assert sum(e == "commented" for e, _ in events) == 2, events
 
         # a corrupted backup prevents deletion
         a101 = s.get(Attachment, "101")
@@ -193,8 +198,21 @@ def test_api():
         assert r.status_code == 200, r.text
         jid = r.json()["id"]
         assert r.json()["attachment_count"] >= 1
-        assert c.post(f"/api/jobs/{jid}/approve").json()["status"] == "approved"
+        assert c.post(f"/api/jobs/{jid}/approve?lang=fr").status_code == 422
+        r = c.post(f"/api/jobs/{jid}/approve?lang=ko").json()
+        assert r["status"] == "approved" and r["params"]["lang"] == "ko", r
         assert c.post(f"/api/jobs/{jid}/approve").status_code == 400
+        # hand-picked cleanup: only backed-up attachments still in Jira
+        assert c.post("/api/cleanup/manual", json={"attachment_ids": []}).status_code == 422
+        r = c.post("/api/cleanup/manual", json={"attachment_ids": ["101", "104"]})
+        assert r.status_code == 400 and "104" in r.json()["detail"], r.text
+        r = c.post("/api/cleanup/manual", json={"attachment_ids": ["101"], "skip_embedded": False})
+        assert r.json()["params"]["skip_embedded"] is False, r.text
+        r = c.post("/api/cleanup/manual", json={"attachment_ids": ["101", "101"]})
+        assert r.status_code == 200 and r.json()["attachment_count"] == 1 and r.json()["status"] == "pending_approval", r.text
+        log = c.get("/api/jobs/1/log").json()
+        assert log and log[0]["event"] == "cleanup_started", log
+        assert c.get(f"/api/jobs/1/log?after={log[-1]['id']}").json() == []
         assert c.post("/api/sync", json={"full": True}).status_code == 200
         assert c.post("/api/sync", json={}).status_code == 409
         # settings: token is write-only and stored encrypted; changes are audited
@@ -298,7 +316,8 @@ def test_silent_comment_request():
                 walk(v)
     walk(body)
 
-    # Korean comment text via JIRA_COMMENT_LANG=ko
+    # Korean comment text: per job (approver's UI language) or JIRA_COMMENT_LANG fallback
+    assert "정리 작업 #7" in str(cleanup_comment([a], 7, "ko"))
     from app.config import settings
     settings.jira_comment_lang = "ko"
     try:

@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Paperclip, Search, X } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ChevronLeft, ChevronRight, Paperclip, Search, Trash2, X } from "lucide-react";
 
 import { BackupBadge, FileLink, IssueLink, PageHeader, StateBadge, STATE_LABEL, EmptyState } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api } from "@/lib/api";
+import { api, ApiError, type Attachment } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { formatBytes, formatDate, formatNumber } from "@/lib/utils";
 
 const ALL = "__all";
+// Only these can go into a delete job (the server checks again).
+const deletable = (a: Attachment) => a.state === "active" && !!a.sha256;
 
 export function AttachmentsPage() {
   const [params, setParams] = useSearchParams();
@@ -53,6 +57,28 @@ export function AttachmentsPage() {
     placeholderData: keepPreviousData,
   });
   const filtered = q || project || state || backup;
+
+  // Selection survives paging and filter changes, so whole issues can be picked across pages.
+  const [selected, setSelected] = useState<Map<string, Attachment>>(new Map());
+  const toggle = (rows: Attachment[], on: boolean) =>
+    setSelected((prev) => {
+      const next = new Map(prev);
+      for (const a of rows) on ? next.set(a.id, a) : next.delete(a.id);
+      return next;
+    });
+  const pageRows = (data?.items ?? []).filter(deletable);
+  const pageChecked = pageRows.length > 0 && pageRows.every((a) => selected.has(a.id));
+  const pageSome = pageRows.some((a) => selected.has(a.id));
+  const selBytes = [...selected.values()].reduce((n, a) => n + a.size, 0);
+  const [skipEmbedded, setSkipEmbedded] = useState(true);
+  const create = useMutation({
+    mutationFn: () => api.cleanupManual([...selected.keys()], skipEmbedded),
+    onSuccess: (job) => {
+      toast.success(t("att.jobCreated", { id: job.id }));
+      navigate(`/jobs/${job.id}`);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t("common.requestFailed")),
+  });
 
   return (
     <>
@@ -109,6 +135,25 @@ export function AttachmentsPage() {
         )}
       </div>
 
+      {selected.size > 0 && (
+        <div className="bg-muted mb-3 flex flex-wrap items-center gap-3 rounded-md px-4 py-2.5 text-sm">
+          <span className="font-medium tabular">{t("att.selected", { n: formatNumber(selected.size), size: formatBytes(selBytes) })}</span>
+          <span className="text-muted-foreground hidden text-xs md:inline">{t("att.selHint")}</span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <label className="mr-2 flex items-center gap-2 text-xs" title={t("cleanup.skipEmbeddedHint")}>
+              <Checkbox checked={skipEmbedded} onCheckedChange={(v) => setSkipEmbedded(v === true)} />
+              {t("cleanup.skipEmbedded")}
+            </label>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Map())}>
+              {t("att.clearSel")}
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => create.mutate()} disabled={create.isPending}>
+              <Trash2 /> {t("att.deleteSel")}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card className="gap-0 overflow-hidden p-3">
         {isLoading ? (
           <div className="grid gap-2 p-4">
@@ -120,6 +165,15 @@ export function AttachmentsPage() {
           <Table className={isFetching ? "opacity-60 transition-opacity" : "transition-opacity"}>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8">
+                  <Checkbox
+                    aria-label={t("att.selectPage")}
+                    title={t("att.selectPage")}
+                    disabled={pageRows.length === 0}
+                    checked={pageChecked ? true : pageSome ? "indeterminate" : false}
+                    onCheckedChange={() => toggle(pageRows, !pageChecked)}
+                  />
+                </TableHead>
                 <TableHead>{t("col.file")}</TableHead>
                 <TableHead>{t("col.issue")}</TableHead>
                 <TableHead>{t("col.uploader")}</TableHead>
@@ -132,6 +186,15 @@ export function AttachmentsPage() {
             <TableBody>
               {data.items.map((a) => (
                 <TableRow key={a.id} className="cursor-pointer" onClick={() => navigate(`/attachments/${a.id}`)}>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      aria-label={t("att.select")}
+                      title={deletable(a) ? undefined : t("att.notSelectable")}
+                      disabled={!deletable(a)}
+                      checked={selected.has(a.id)}
+                      onCheckedChange={(v) => toggle([a], v === true)}
+                    />
+                  </TableCell>
                   <TableCell>
                     <FileLink a={a} />
                     <div className="text-muted-foreground max-w-[340px] truncate text-xs">{a.mime_type}</div>

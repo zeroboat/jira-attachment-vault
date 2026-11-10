@@ -7,7 +7,8 @@ The API account needs Administer Jira, or Administer Projects on that project.
 If notifications can't be suppressed (e.g. missing permission), the comment is skipped rather
 than posted in a way that notifies people.
 
-Comment language: JIRA_COMMENT_LANG = en (default) | ko.
+Comment language: the approver's UI language (saved on the job at approval);
+JIRA_COMMENT_LANG (default en) is the fallback.
 """
 import logging
 from collections import OrderedDict
@@ -15,7 +16,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .config import settings
-from .db import Attachment, as_utc, audit, utcnow
+from .db import Attachment, as_utc, audit, job_log, utcnow
 from .jira import JiraClient, JiraError
 
 log = logging.getLogger(__name__)
@@ -94,14 +95,14 @@ TEXT = {
 }
 
 
-def _t() -> dict:
-    return TEXT.get(settings.jira_comment_lang, TEXT["en"])
+def _t(lang: str | None = None) -> dict:
+    return TEXT.get(lang or settings.jira_comment_lang, TEXT["en"])
 
 
-def cleanup_comment(items: list[Attachment], job_id: int) -> dict:
+def cleanup_comment(items: list[Attachment], job_id: int, lang: str | None = None) -> dict:
     total = sum(a.size or 0 for a in items)
     rows = [[a.filename, human_size(a.size), _local(a.created_at), a.author_name or "-"] for a in items]
-    t = _t()
+    t = _t(lang)
     return _doc(
         _para(_text(t["cleanup_title"], strong=True), _text(t["auto"])),
         _para(_text(t["cleanup_body"].format(n=len(items), size=human_size(total)))),
@@ -111,9 +112,10 @@ def cleanup_comment(items: list[Attachment], job_id: int) -> dict:
     )
 
 
-def restore_comment(items: list[tuple[Attachment, str | None]], job_id: int) -> dict:
+def restore_comment(items: list[tuple[Attachment, str | None]], job_id: int,
+                    lang: str | None = None) -> dict:
     names = ", ".join(a.filename for a, _ in items)
-    t = _t()
+    t = _t(lang)
     return _doc(
         _para(_text(t["restore_title"], strong=True), _text(t["auto"])),
         _para(_text(t["restore_body"].format(names=names))),
@@ -144,9 +146,11 @@ def post_notices(session, client: JiraClient, groups: "OrderedDict[str, tuple[st
             client.add_silent_comment(issue_id, body)
             res["ok"] += 1
             audit(session, actor, "issue_commented", detail={"job": job_id, "issue_key": issue_key})
+            job_log(session, job_id, "commented", issue=issue_key)
         except JiraError as exc:
             res["failed"] += 1
             res["errors"][issue_key] = _reason(exc)
+            job_log(session, job_id, "comment_failed", level="warn", issue=issue_key, error=_reason(exc))
             log.warning("Comment failed %s: %s", issue_key, exc)
         session.commit()
     return res

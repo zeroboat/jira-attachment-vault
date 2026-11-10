@@ -14,13 +14,13 @@ from sqlalchemy import func, or_, select
 from . import auth, settings_store
 from .config import settings
 from .db import (ACTIVE, DELETED_BY_VAULT, MISSING_IN_JIRA, Attachment,
-                 AuditLog, Job, SessionLocal, audit, get_state, init_db)
+                 AuditLog, Job, JobLog, SessionLocal, audit, get_state, init_db)
 from .jira import JiraClient, JiraError
 from .jobs import (Policy, candidates_query, candidates_summary,
-                   create_cleanup_job, create_restore_job)
+                   create_cleanup_job, create_manual_cleanup_job, create_restore_job)
 from .schemas import (AppConfig, AttachmentDetail, AttachmentOut, AuditOut,
-                      CleanupPreview, Dashboard, JobDetail, JobOut, LoginIn,
-                      JiraTestIn, Page, PasswordIn, PolicyIn, ProjectUsage,
+                      CleanupPreview, Dashboard, JobDetail, JobLogOut, JobOut, LoginIn,
+                      JiraTestIn, ManualCleanupIn, Page, PasswordIn, PolicyIn, ProjectUsage,
                       SettingsIn, SettingsOut, SyncIn, SyncInfo, Totals)
 from .storage import get_storage
 
@@ -275,6 +275,14 @@ def cleanup_create(body: PolicyIn, db=Depends(get_db), user: str = Depends(auth.
     return job_out(create_cleanup_job(db, policy, user))
 
 
+@api.post("/cleanup/manual", response_model=JobOut)
+def cleanup_manual(body: ManualCleanupIn, db=Depends(get_db), user: str = Depends(auth.require_user)):
+    try:
+        return job_out(create_manual_cleanup_job(db, body.attachment_ids, user, body.skip_embedded))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 # ---------- jobs ----------
 @api.get("/jobs", response_model=list[JobOut])
 def list_jobs(status: str = "", db=Depends(get_db)):
@@ -297,12 +305,21 @@ def job_detail(job_id: int, db=Depends(get_db)):
     return JobDetail(job=job_out(job), items=items, total_bytes=int(total or 0))
 
 
+@api.get("/jobs/{job_id}/log", response_model=list[JobLogOut])
+def job_log_list(job_id: int, after: int = 0, limit: int = Query(1000, ge=1, le=5000), db=Depends(get_db)):
+    return db.scalars(select(JobLog).where(JobLog.job_id == job_id, JobLog.id > after)
+                      .order_by(JobLog.id).limit(limit)).all()
+
+
 @api.post("/jobs/{job_id}/approve", response_model=JobOut)
-def job_approve(job_id: int, db=Depends(get_db), user: str = Depends(auth.require_user)):
+def job_approve(job_id: int, lang: str = Query("", pattern="^(en|ko)?$"), db=Depends(get_db),
+                user: str = Depends(auth.require_user)):
     job = db.get(Job, job_id)
     if not job or job.status != "pending_approval":
         raise HTTPException(400, "This job cannot be approved in its current state.")
     job.status, job.approved_by = "approved", user
+    if lang:  # notice comments follow the approver's UI language
+        job.params = {**(job.params or {}), "lang": lang}
     audit(db, user, f"{job.kind}_approved", detail={"job": job.id})
     db.commit()
     return job_out(job)

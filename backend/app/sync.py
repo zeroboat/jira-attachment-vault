@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from .config import settings
-from .db import (ACTIVE, MISSING_IN_JIRA, Attachment, as_utc, audit, get_state,
+from .db import (ACTIVE, MISSING_IN_JIRA, Attachment, as_utc, audit, get_state, job_log,
                  set_state, utcnow)
 from .jira import JiraClient, JiraError
 from .storage import Storage, manifest_key, object_key
@@ -45,7 +45,7 @@ def build_jql(since_utc: datetime | None) -> str:
     return " AND ".join(parts) + " ORDER BY updated ASC"
 
 
-def sync(session, client: JiraClient, full: bool = False) -> dict:
+def sync(session, client: JiraClient, full: bool = False, job_id: int | None = None) -> dict:
     """Upsert the attachment list into the DB.
 
     Incremental: only issues updated since the last sync.
@@ -59,6 +59,7 @@ def sync(session, client: JiraClient, full: bool = False) -> dict:
             since = datetime.fromisoformat(last) - timedelta(minutes=settings.sync_overlap_minutes)
     jql = build_jql(since)
     log.info("Sync started (full=%s): %s", full, jql)
+    job_log(session, job_id, "sync_started", full=full, jql=jql)
 
     stats = {"issues": 0, "new": 0, "updated": 0, "reappeared": 0, "missing": 0, "full": full}
     for issue in client.search_issues(jql):
@@ -73,11 +74,14 @@ def sync(session, client: JiraClient, full: bool = False) -> dict:
                 obj = Attachment(id=a["id"], state=ACTIVE, first_seen_at=started)
                 session.add(obj)
                 stats["new"] += 1
+                job_log(session, job_id, "found", issue=issue_key, file=a.get("filename"),
+                        size=int(a.get("size") or 0))
             else:
                 stats["updated"] += 1
                 if obj.state == MISSING_IN_JIRA:
                     obj.state = ACTIVE
                     stats["reappeared"] += 1
+                    job_log(session, job_id, "reappeared", obj)
             author = a.get("author") or {}
             obj.issue_id = str(issue["id"])
             obj.issue_key = issue_key
@@ -93,6 +97,7 @@ def sync(session, client: JiraClient, full: bool = False) -> dict:
             obj.created_at = parse_jira_dt(a.get("created")) or started
             obj.last_seen_at = started
         if stats["issues"] % 50 == 0:
+            job_log(session, job_id, "sync_progress", issues=stats["issues"])
             session.commit()
 
     if full:
@@ -101,11 +106,13 @@ def sync(session, client: JiraClient, full: bool = False) -> dict:
         for obj in stale:
             obj.state = MISSING_IN_JIRA
             audit(session, "system", "missing_in_jira", obj)
+            job_log(session, job_id, "missing", obj, level="warn")
             stats["missing"] += 1
         set_state(session, "last_full_sync", started.isoformat())
 
     set_state(session, "last_sync_started", started.isoformat())
     set_state(session, "last_sync_result", json.dumps(stats))
+    job_log(session, job_id, "sync_finished", **stats)
     session.commit()
     log.info("Sync finished: %s", stats)
     return stats
@@ -153,7 +160,8 @@ def backup_one(session, client: JiraClient, storage: Storage, obj: Attachment) -
             os.unlink(tmp)
 
 
-def backup_pending(session, client: JiraClient, storage: Storage, limit: int | None = None) -> dict:
+def backup_pending(session, client: JiraClient, storage: Storage, limit: int | None = None,
+                   job_id: int | None = None) -> dict:
     q = (select(Attachment)
          .where(Attachment.state == ACTIVE, Attachment.sha256.is_(None),
                 Attachment.backup_attempts < MAX_BACKUP_ATTEMPTS)
@@ -161,11 +169,14 @@ def backup_pending(session, client: JiraClient, storage: Storage, limit: int | N
     if limit:
         q = q.limit(limit)
     stats = {"ok": 0, "failed": 0, "bytes": 0, "missing": 0}
-    for obj in session.scalars(q).all():
+    todo = session.scalars(q).all()
+    job_log(session, job_id, "backup_started", count=len(todo))
+    for obj in todo:
         obj.backup_attempts = (obj.backup_attempts or 0) + 1
         try:
             backup_one(session, client, storage, obj)
             audit(session, "system", "backed_up", obj, {"sha256": obj.sha256})
+            job_log(session, job_id, "backed_up", obj, size=obj.size)
             stats["ok"] += 1
             stats["bytes"] += obj.size or 0
         except JiraError as exc:
@@ -173,16 +184,20 @@ def backup_pending(session, client: JiraClient, storage: Storage, limit: int | N
                 obj.state = MISSING_IN_JIRA
                 obj.backup_error = "Not found in Jira (deleted before backup)"
                 audit(session, "system", "missing_in_jira", obj)
+                job_log(session, job_id, "missing", obj, level="warn")
                 stats["missing"] += 1
             else:
                 obj.backup_error = str(exc)[:1000]
+                job_log(session, job_id, "backup_failed", obj, level="error", error=obj.backup_error[:300])
                 stats["failed"] += 1
             log.warning("Backup failed %s (%s): %s", obj.id, obj.filename, exc)
         except Exception as exc:  # noqa: BLE001
             obj.backup_error = f"{type(exc).__name__}: {exc}"[:1000]
+            job_log(session, job_id, "backup_failed", obj, level="error", error=obj.backup_error[:300])
             stats["failed"] += 1
             log.exception("Backup failed %s (%s)", obj.id, obj.filename)
         session.commit()
+    job_log(session, job_id, "backup_finished", **stats)
     set_state(session, "last_backup_result", json.dumps(stats))
     session.commit()
     return stats

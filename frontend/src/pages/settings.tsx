@@ -25,7 +25,6 @@ interface Form {
   jira_extra_jql: string;
   jira_user_timezone: string;
   jira_comment: boolean;
-  jira_comment_lang: "en" | "ko";
   sync_interval_minutes: string;
   full_reconcile_hours: string;
 }
@@ -38,7 +37,6 @@ const toForm = (s: Settings): Form => ({
   jira_extra_jql: s.jira_extra_jql,
   jira_user_timezone: s.jira_user_timezone,
   jira_comment: s.jira_comment,
-  jira_comment_lang: s.jira_comment_lang,
   sync_interval_minutes: String(s.sync_interval_minutes),
   full_reconcile_hours: String(s.full_reconcile_hours),
 });
@@ -77,7 +75,6 @@ export function SettingsPage() {
         jira_extra_jql: f.jira_extra_jql.trim(),
         jira_user_timezone: f.jira_user_timezone.trim(),
         jira_comment: f.jira_comment,
-        jira_comment_lang: f.jira_comment_lang,
         sync_interval_minutes: Number(f.sync_interval_minutes),
         full_reconcile_hours: Number(f.full_reconcile_hours),
       }),
@@ -200,17 +197,6 @@ export function SettingsPage() {
                   <span className="text-muted-foreground text-xs">{t("settings.commentOnHint")}</span>
                 </Label>
               </div>
-              <Field label={t("settings.commentLang")}>
-                <Select value={form.jira_comment_lang} onValueChange={(v) => set({ jira_comment_lang: v as "en" | "ko" })} disabled={!form.jira_comment}>
-                  <SelectTrigger className="bg-background w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="ko">한국어</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
             </CardContent>
           </Card>
 

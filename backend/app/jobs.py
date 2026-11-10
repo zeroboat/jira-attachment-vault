@@ -11,7 +11,7 @@ from sqlalchemy import Select, func, select
 
 from .config import settings
 from .db import (ACTIVE, DELETED_BY_VAULT, RESTORED, Attachment, Job, audit,
-                 utcnow)
+                 job_log, utcnow)
 from .jira import JiraClient, JiraError
 from .notice import cleanup_comment, post_notices, restore_comment
 from .storage import Storage
@@ -85,6 +85,23 @@ def create_cleanup_job(session, policy: Policy, actor: str) -> Job:
     return job
 
 
+def create_manual_cleanup_job(session, attachment_ids: list[str], actor: str,
+                              skip_embedded: bool = True) -> Job:
+    """Cleanup of hand-picked attachments. Only active, backed-up ones are accepted."""
+    ids = list(dict.fromkeys(attachment_ids))
+    ok = set(session.scalars(select(Attachment.id).where(
+        Attachment.id.in_(ids), Attachment.state == ACTIVE, Attachment.sha256.is_not(None))).all())
+    if bad := [i for i in ids if i not in ok]:
+        raise ValueError(f"Only backed-up attachments still in Jira can be deleted: {', '.join(bad[:10])}")
+    job = Job(kind="cleanup", status="pending_approval", title=f"Selected {len(ids)} attachment(s)",
+              params={"manual": True, "skip_embedded": skip_embedded}, attachment_ids=ids, created_by=actor)
+    session.add(job)
+    session.flush()
+    audit(session, actor, "cleanup_requested", detail={"job": job.id, "count": len(ids), "manual": True})
+    session.commit()
+    return job
+
+
 def create_restore_job(session, attachment_ids: list[str], actor: str) -> Job:
     job = Job(kind="restore", status="pending_approval",
               title=f"Restore {len(attachment_ids)} attachment(s)", attachment_ids=attachment_ids,
@@ -108,34 +125,41 @@ def run_cleanup(session, client: JiraClient, storage: Storage, job: Job) -> dict
            "dry_run": settings.dry_run, "reasons": {}}
     deleted_by_issue: "OrderedDict[str, list[Attachment]]" = OrderedDict()
 
-    def skip(reason: str, att_id: str) -> None:
+    def skip(reason: str, att_id: str, obj: Attachment | None = None) -> None:
         res["skipped"] += 1
         res["reasons"].setdefault(reason, []).append(att_id)
+        job_log(session, job.id, "skipped", obj, level="warn", reason=reason,
+                **({} if obj else {"id": att_id}))
+        session.commit()
 
+    job_log(session, job.id, "cleanup_started", count=len(job.attachment_ids), dry_run=settings.dry_run)
+    session.commit()
     for att_id in job.attachment_ids:
         obj = session.get(Attachment, att_id)
         if obj is None or obj.state != ACTIVE:
-            skip("not_in_jira", att_id)
+            skip("not_in_jira", att_id, obj)
             continue
         try:
             # 1) back up now if there is no backup yet
             if not obj.sha256:
                 backup_one(session, client, storage, obj)
+                job_log(session, job.id, "backed_up", obj, size=obj.size)
                 session.commit()
             # 2) re-read the stored file and verify its hash
             if not storage.verify(obj.storage_key, obj.sha256):
-                skip("backup_verify_failed", att_id)
+                skip("backup_verify_failed", att_id, obj)
                 continue
             # 3) is it an image used inline in the description/comments?
             if skip_embedded:
                 if obj.issue_id not in text_cache:
                     text_cache[obj.issue_id] = client.get_issue_text(obj.issue_id)
                 if _is_embedded(obj.filename, text_cache[obj.issue_id]):
-                    skip("embedded", att_id)
+                    skip("embedded", att_id, obj)
                     continue
             # 4) delete
             if settings.dry_run:
                 audit(session, job.approved_by or "system", "dry_run_delete", obj, {"job": job.id})
+                job_log(session, job.id, "would_delete", obj, size=obj.size)
                 res["deleted"] += 1
                 res["freed_bytes"] += obj.size or 0
                 session.commit()
@@ -149,6 +173,7 @@ def run_cleanup(session, client: JiraClient, storage: Storage, job: Job) -> dict
             obj.deleted_at = utcnow()
             audit(session, job.approved_by or "system", "deleted", obj,
                   {"job": job.id, "sha256": obj.sha256})
+            job_log(session, job.id, "deleted", obj, size=obj.size)
             deleted_by_issue.setdefault(obj.issue_id, []).append(obj)
             res["deleted"] += 1
             res["freed_bytes"] += obj.size or 0
@@ -158,9 +183,14 @@ def run_cleanup(session, client: JiraClient, storage: Storage, job: Job) -> dict
             log.exception("Delete failed %s", att_id)
             res["failed"] += 1
             res["reasons"].setdefault(f"error:{type(exc).__name__}", []).append(att_id)
+            job_log(session, job.id, "failed", obj, level="error",
+                    error=f"{type(exc).__name__}: {exc}"[:300])
+            session.commit()
 
     # 5) one silent notice comment per issue that actually lost attachments (none in dry run)
-    groups = OrderedDict((iid, (items[0].issue_key, cleanup_comment(items, job.id)))
+    if settings.jira_comment and settings.dry_run and res["deleted"]:
+        job_log(session, job.id, "comments_dry_run")
+    groups = OrderedDict((iid, (items[0].issue_key, cleanup_comment(items, job.id, (job.params or {}).get("lang"))))
                          for iid, items in deleted_by_issue.items())
     res["comments"] = post_notices(session, client, groups, job.approved_by or "system", job.id)
     return res
@@ -168,6 +198,8 @@ def run_cleanup(session, client: JiraClient, storage: Storage, job: Job) -> dict
 
 def run_restore(session, client: JiraClient, storage: Storage, job: Job) -> dict:
     res = {"restored": 0, "failed": 0, "errors": {}}
+    job_log(session, job.id, "restore_started", count=len(job.attachment_ids))
+    session.commit()
     restored_by_issue: "OrderedDict[str, list[tuple[Attachment, str | None]]]" = OrderedDict()
     for att_id in job.attachment_ids:
         obj = session.get(Attachment, att_id)
@@ -185,6 +217,7 @@ def run_restore(session, client: JiraClient, storage: Storage, job: Job) -> dict
             obj.restored_as_id = new_id
             audit(session, job.approved_by or "system", "restored", obj,
                   {"job": job.id, "new_attachment_id": new_id})
+            job_log(session, job.id, "restored", obj, new_id=new_id)
             restored_by_issue.setdefault(obj.issue_id, []).append((obj, new_id))
             res["restored"] += 1
             session.commit()
@@ -193,10 +226,13 @@ def run_restore(session, client: JiraClient, storage: Storage, job: Job) -> dict
             log.exception("Restore failed %s", att_id)
             res["failed"] += 1
             res["errors"][att_id] = str(exc)[:300]
+            job_log(session, job.id, "failed", obj, level="error", error=str(exc)[:300],
+                    **({} if obj else {"id": att_id}))
+            session.commit()
         finally:
             os.unlink(tmp)
 
-    groups = OrderedDict((iid, (items[0][0].issue_key, restore_comment(items, job.id)))
+    groups = OrderedDict((iid, (items[0][0].issue_key, restore_comment(items, job.id, (job.params or {}).get("lang"))))
                          for iid, items in restored_by_issue.items())
     res["comments"] = post_notices(session, client, groups, job.approved_by or "system", job.id)
     return res
@@ -213,16 +249,18 @@ def run_job(session, client: JiraClient, storage: Storage, job: Job) -> None:
             result = run_restore(session, client, storage, job)
         elif job.kind in ("sync", "full_sync"):
             from .sync import backup_pending
-            result = {"sync": sync(session, client, full=job.kind == "full_sync"),
-                      "backup": backup_pending(session, client, storage)}
+            result = {"sync": sync(session, client, full=job.kind == "full_sync", job_id=job.id),
+                      "backup": backup_pending(session, client, storage, job_id=job.id)}
         else:
             raise ValueError(f"Unknown job kind: {job.kind}")
         job.status = "done"
         job.result = result
+        job_log(session, job.id, "job_done")
     except Exception as exc:  # noqa: BLE001
         session.rollback()
         log.exception("Job %s failed", job.id)
         job.status = "failed"
         job.result = {"error": f"{type(exc).__name__}: {exc}"[:2000]}
+        job_log(session, job.id, "job_failed", level="error", error=job.result["error"][:300])
     job.finished_at = utcnow()
     session.commit()

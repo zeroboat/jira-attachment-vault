@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Ban, ChevronLeft, CircleCheck, ListChecks, MessageSquare, Play, TriangleAlert } from "lucide-react";
@@ -8,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, ApiError, type Job } from "@/lib/api";
+import { api, ApiError, type Job, type JobLogLine } from "@/lib/api";
 import { useConfig } from "@/lib/config";
-import { label, reasonLabel, t } from "@/lib/i18n";
-import { formatBytes, formatDate, formatNumber } from "@/lib/utils";
+import { label, reasonLabel, t, type Key } from "@/lib/i18n";
+import { cn, formatBytes, formatDate, formatNumber } from "@/lib/utils";
 
 export function JobsPage() {
   const navigate = useNavigate();
@@ -153,6 +154,8 @@ export function JobDetailPage() {
         {job.result && <ResultCard job={job} />}
       </div>
 
+      <JobLogCard jobId={job.id} live={["approved", "running"].includes(job.status)} />
+
       {items.length > 0 && (
         <Card className="mt-4 gap-0 pb-3 [&>[data-slot=table-container]]:px-3">
           <CardHeader className="pb-4">
@@ -190,6 +193,50 @@ export function JobDetailPage() {
         </Card>
       )}
     </>
+  );
+}
+
+function logText(l: JobLogLine): string {
+  const d: Record<string, any> = { ...(l.data ?? {}) };
+  if (typeof d.size === "number") d.size = formatBytes(d.size);
+  if (d.reason) d.reason = reasonLabel(d.reason);
+  d.file ??= d.id ?? "";
+  d.dry = d.dry_run ? t("log.dry") : "";
+  return t(`log.${l.event}` as Key, d);
+}
+
+/** Step-by-step log written by the worker; polls while the job runs. */
+function JobLogCard({ jobId, live }: { jobId: number; live: boolean }) {
+  const [problems, setProblems] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["jobLog", jobId],
+    queryFn: () => api.jobLog(jobId),
+    refetchInterval: live ? 2000 : false,
+  });
+  const lines = (data ?? []).filter((l) => !problems || l.level !== "info");
+  return (
+    <Card className="mt-4 gap-0 pb-3">
+      <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <CardTitle>{t("log.title")}</CardTitle>
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={problems} onChange={(e) => setProblems(e.target.checked)} />
+          {t("log.problems")}
+        </label>
+      </CardHeader>
+      <CardContent className="max-h-[480px] overflow-auto px-5 font-mono text-xs">
+        {lines.length === 0 ? (
+          <span className="text-muted-foreground">{t("log.empty")}</span>
+        ) : (
+          lines.map((l) => (
+            <div key={l.id} className={cn("flex gap-3 py-0.5", l.level === "error" && "text-destructive", l.level === "warn" && "text-warning-ink")}>
+              <span className="text-muted-foreground shrink-0 tabular">{formatDate(l.at, "seconds")}</span>
+              {l.issue_key && <span className="shrink-0">{l.issue_key}</span>}
+              <span className="break-all">{logText(l)}</span>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

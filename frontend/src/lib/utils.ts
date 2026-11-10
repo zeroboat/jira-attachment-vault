@@ -27,7 +27,7 @@ export function setDisplayTimezone(value: string) {
   tz = value || "Asia/Seoul";
 }
 
-export function formatDate(iso: string | null | undefined, withTime = true): string {
+export function formatDate(iso: string | null | undefined, withTime: boolean | "seconds" = true): string {
   if (!iso) return "-";
   const d = new Date(iso);
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -36,10 +36,12 @@ export function formatDate(iso: string | null | undefined, withTime = true): str
     month: "2-digit",
     day: "2-digit",
     ...(withTime ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : {}),
+    ...(withTime === "seconds" ? { second: "2-digit" } : {}),
   }).formatToParts(d);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   const date = `${get("year")}-${get("month")}-${get("day")}`;
-  return withTime ? `${date} ${get("hour")}:${get("minute")}` : date;
+  if (!withTime) return date;
+  return `${date} ${get("hour")}:${get("minute")}` + (withTime === "seconds" ? `:${get("second")}` : "");
 }
 
 export function timeAgo(iso: string | null | undefined): string {

@@ -100,7 +100,7 @@ Thanks to `manifest/`, **even if the DB is lost** the backup alone tells you whi
 ## Configuration
 
 **Settings page (stored in the DB).** Jira connection (URL, email, API token, projects, extra JQL, timezone),
-notice comments (on/off, language), sync intervals, dry run, and the admin password are changed in the web UI.
+notice comments (on/off), sync intervals, dry run, and the admin password are changed in the web UI.
 Changes apply without a restart and are recorded in the Audit log. The API token is encrypted with `SECRET_KEY`
 and never sent back to the browser.
 
@@ -190,6 +190,7 @@ A cleanup job processes each attachment in this order:
 ## Jira notice comments (silent)
 
 Issues whose attachments were **actually deleted** by cleanup, or **restored**, get one notice comment per issue, so people asking "where did my attachment go?" find the answer in the issue itself.
+Comments are written in the UI language of the person who approved the job (English or Korean).
 
 > 🗄️ **Attachment archive notice** (automated)
 > The 2 attachment(s) below (3.6 GB) were moved to the internal archive to free up Jira storage. Ask an administrator if you need them restored.

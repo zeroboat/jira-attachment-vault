@@ -95,6 +95,20 @@ class AuditLog(Base):
     detail: Mapped[dict | None] = mapped_column(JSON)
 
 
+class JobLog(Base):
+    """Step-by-step log of a job. `event` is a code the UI translates; `data` holds its values."""
+    __tablename__ = "job_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    level: Mapped[str] = mapped_column(String(8), default="info")  # info | warn | error
+    event: Mapped[str] = mapped_column(String(64))
+    attachment_id: Mapped[str | None] = mapped_column(String(32))
+    issue_key: Mapped[str | None] = mapped_column(String(64))
+    data: Mapped[dict | None] = mapped_column(JSON)
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 
@@ -142,6 +156,18 @@ def audit(session, actor: str, action: str, att: "Attachment | None" = None,
     ))
 
 
-__all__ = ["Attachment", "Job", "AuditLog", "SyncState", "SessionLocal", "engine",
+def job_log(session, job_id: int | None, event: str, att: "Attachment | None" = None,
+            level: str = "info", **data) -> None:
+    """Add a line to a job's log (no-op outside a job). Committed with the caller's next commit."""
+    if job_id is None:
+        return
+    if att is not None:
+        data.setdefault("file", att.filename)
+    session.add(JobLog(job_id=job_id, event=event, level=level, data=data or None,
+                       attachment_id=att.id if att else None,
+                       issue_key=att.issue_key if att else None))
+
+
+__all__ = ["Attachment", "Job", "JobLog", "AuditLog", "job_log", "SyncState", "SessionLocal", "engine",
            "init_db", "get_state", "set_state", "audit", "utcnow", "as_utc", "select",
            "ACTIVE", "DELETED_BY_VAULT", "MISSING_IN_JIRA", "RESTORED"]
