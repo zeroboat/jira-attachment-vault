@@ -79,6 +79,8 @@ manifest/<PROJECT>/<ISSUE-KEY>/<id>.json     원래 파일명·이슈·업로더
    sudo mkdir -p /mnt/vault-disk/jira-attachments
    sudo chown 1000:1000 /mnt/vault-disk/jira-attachments   # 앱 컨테이너가 uid 1000으로 실행돼요
    ```
+   macOS의 Docker Desktop이나 rootless Podman에서는 `chown`이 VM 안에 반영되지 않아요. 대신 폴더에 `chmod 777`을 주세요
+   (로컬에서 시험할 때만. 여러 사람이 쓰는 서버에서는 쓰지 마세요).
 
 3. **설정 파일을 만들어요.**
    ```bash

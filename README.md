@@ -79,6 +79,8 @@ Thanks to `manifest/`, **even if the DB is lost** the backup alone tells you whi
    sudo mkdir -p /mnt/vault-disk/jira-attachments
    sudo chown 1000:1000 /mnt/vault-disk/jira-attachments   # the app container runs as uid 1000
    ```
+   On macOS with Docker Desktop or rootless Podman, `chown` has no effect inside the VM; use `chmod 777` on the folder instead
+   (fine for a local trial, not for a shared server).
 
 3. **Create the config file.**
    ```bash
