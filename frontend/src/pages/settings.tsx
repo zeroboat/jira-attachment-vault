@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleCheck, HardDrive, KeyRound, LoaderCircle, Plug, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleCheck, HardDrive, KeyRound, Languages, LoaderCircle, Plug, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { ConfirmButton, PageHeader } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, ApiError, type Settings } from "@/lib/api";
 import { useConfig } from "@/lib/config";
-import { t } from "@/lib/i18n";
+import { lang, LANGS, setLang, t, type Lang } from "@/lib/i18n";
 
 /** Editable form state; numbers and lists are kept as strings while typing. */
 interface Form {
@@ -239,6 +239,29 @@ export function SettingsPage() {
         </form>
 
         <div className="grid content-start gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Languages className="size-4" /> {t("lang.label")}
+              </CardTitle>
+              <CardDescription>{t("settings.langDesc")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select value={lang} onValueChange={(v) => v !== lang && setLang(v as Lang)}>
+                <SelectTrigger className="bg-background w-full" aria-label={t("lang.label")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(LANGS) as Lang[]).map((l) => (
+                    <SelectItem key={l} value={l}>
+                      {LANGS[l]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

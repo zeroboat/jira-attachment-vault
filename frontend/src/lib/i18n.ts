@@ -267,6 +267,7 @@ const en = {
   "action.password_changed": "Password changed",
 
   "settings.title": "Settings",
+  "settings.langDesc": "Display language for this browser.",
   "settings.desc": "Changes are saved to the database and apply right away, no restart needed.",
   "settings.welcome": "Connect to Jira to get started",
   "settings.welcomeHint": "Enter the Jira URL, account email and API token, test the connection, then save.",
@@ -588,6 +589,7 @@ const ko: Record<Key, string> = {
   "action.password_changed": "비밀번호 변경",
 
   "settings.title": "설정",
+  "settings.langDesc": "이 브라우저에서 쓰는 화면 언어예요.",
   "settings.desc": "바꾼 값은 DB에 저장되고 재시작 없이 바로 적용돼요.",
   "settings.welcome": "먼저 Jira를 연결하세요",
   "settings.welcomeHint": "Jira 주소, 계정 이메일, API 토큰을 넣고 연결 테스트를 한 뒤 저장하세요.",
