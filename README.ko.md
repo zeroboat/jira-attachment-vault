@@ -273,3 +273,7 @@ cd backend && python -m app.worker
 cd backend && python -m pytest tests -q     # 가짜 Jira·가짜 S3로 동기화→백업→정리→복원, API, 저장소 복사
 cd frontend && npm run build                # 타입 검사 + 빌드
 ```
+
+## 라이선스
+
+[MIT](LICENSE)

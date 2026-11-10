@@ -280,3 +280,7 @@ cd frontend && npm run build                # type check + build
 ### Adding a UI language
 
 UI strings live in `frontend/src/lib/i18n.ts`. Add a dictionary typed as `Record<Key, string>` (TypeScript flags any missing key) and register it in `LANGS`.
+
+## License
+
+[MIT](LICENSE)
