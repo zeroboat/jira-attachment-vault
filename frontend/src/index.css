@@ -1,0 +1,149 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.css";
+
+/*
+ * Design tokens mapped onto shadcn/ui variable names.
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Wanted Sans Variable", "Wanted Sans", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", sans-serif;
+
+  /* Radius scales with size: small 10 · floating 14 · large 20 · buttons and badges are pills */
+  --radius-sm: var(--radius);
+  --radius-md: calc(var(--radius) + 4px);
+  --radius-lg: calc(var(--radius) + 10px);
+  --radius-xl: calc(var(--radius) + 10px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-ink: var(--destructive-ink);
+  --color-border: var(--border);
+  --color-line-strong: var(--line-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-mint: var(--mint);
+  --color-success-soft: var(--success-soft);
+  --color-success-ink: var(--success-ink);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-ink: var(--warning-ink);
+  --color-gauge-rest: var(--gauge-rest);
+  --shadow-float: var(--shadow-float-value);
+}
+
+:root {
+  --radius: 10px;
+  --background: #f5f4fa; /* canvas */
+  --foreground: #1e1b2e; /* ink */
+  --card: #ffffff; /* surface */
+  --card-foreground: #1e1b2e;
+  --popover: #ffffff;
+  --popover-foreground: #1e1b2e;
+  --muted: #f0eef7; /* surface-sunken */
+  --muted-foreground: #5e5a75; /* ink-muted */
+  --faint: #8a86a0; /* ink-faint: placeholders only */
+  --accent: #f0eef7;
+  --accent-foreground: #1e1b2e;
+  --secondary: #f0eef7;
+  --secondary-foreground: #1e1b2e;
+  --border: #e4e1ef; /* line */
+  --line-strong: #d3cfe3;
+  --input: #8c87a6; /* border-control (3:1) */
+  --primary: #5b4bdb;
+  --primary-hover: #4c3dc9;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eeebfd;
+  --primary-ink: #4436b8;
+  --ring: #5b4bdb;
+  --mint: #12a594;
+  --success-soft: #ddf5f1;
+  --success-ink: #0a6b60;
+  --warning-soft: #fff1d6;
+  --warning-ink: #8a5a00;
+  --destructive: #c93a53;
+  --destructive-hover: #b32f47;
+  --destructive-soft: #fce8ec;
+  --destructive-ink: #b02a43;
+  --gauge-rest: #dcd7f5;
+  --shadow-float-value: 0 8px 28px rgba(30, 27, 46, 0.14), 0 2px 6px rgba(30, 27, 46, 0.08);
+}
+
+.dark {
+  --background: #15131f;
+  --foreground: #f1eff8;
+  --card: #1d1a2a;
+  --card-foreground: #f1eff8;
+  --popover: #1d1a2a;
+  --popover-foreground: #f1eff8;
+  --muted: #252236;
+  --muted-foreground: #a9a4c2;
+  --faint: #7d7896;
+  --accent: #252236;
+  --accent-foreground: #f1eff8;
+  --secondary: #252236;
+  --secondary-foreground: #f1eff8;
+  --border: #322e45;
+  --line-strong: #433e5a;
+  --input: #77718f;
+  --primary: #8f82f0;
+  --primary-hover: #a397f5;
+  --primary-foreground: #15131f;
+  --primary-soft: #2b2650;
+  --primary-ink: #c2baff;
+  --ring: #8f82f0;
+  --mint: #26a898;
+  --success-soft: #11312d;
+  --success-ink: #6fe0cf;
+  --warning-soft: #3a2c10;
+  --warning-ink: #f5c46b;
+  --destructive: #c93a53;
+  --destructive-hover: #b32f47;
+  --destructive-soft: #3d1720;
+  --destructive-ink: #ff9aab;
+  --gauge-rest: #3a3460;
+  --shadow-float-value: 0 8px 28px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 14px;
+    line-height: 22px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,0 +1,110 @@
+# How to run
+#   Plain files on disk:  STORAGE_BACKEND=local      →  docker compose up -d
+#   SeaweedFS:            STORAGE_BACKEND=seaweedfs  →  docker compose --profile seaweedfs up -d
+#   (or put COMPOSE_PROFILES=seaweedfs in .env so plain `up -d` starts it too)
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  depends_on:
+    db: { condition: service_healthy }
+    seaweedfs-filer: { condition: service_started, required: false }
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vault
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ${DB_DIR:-./data/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault -d vault"]
+      interval: 5s
+      retries: 10
+
+  web:
+    <<: *app
+    environment:
+      DATABASE_URL: postgresql+psycopg://vault:${POSTGRES_PASSWORD}@db:5432/vault
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      STORAGE_LOCAL_PATH: /vault
+    volumes:
+      - ${VAULT_DIR:-./data/vault}:/vault
+    ports:
+      - "${WEB_PORT:-8080}:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    <<: *app
+    environment:
+      DATABASE_URL: postgresql+psycopg://vault:${POSTGRES_PASSWORD}@db:5432/vault
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      STORAGE_LOCAL_PATH: /vault
+      TMP_DIR: /vault/.tmp
+    volumes:
+      - ${VAULT_DIR:-./data/vault}:/vault
+    command: python -m app.worker
+
+  # ---------------- SeaweedFS (--profile seaweedfs) ----------------
+  # master, filer metadata → SSD (SEAWEEDFS_SSD_DIR)
+  # volume (file content)      → HDD (SEAWEEDFS_HDD_DIR)
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-latest}
+    profiles: [seaweedfs]
+    restart: unless-stopped
+    entrypoint: ["/usr/bin/weed"]
+    command: >
+      -logtostderr=true master
+      -ip=seaweedfs-master -ip.bind=0.0.0.0 -port=9333
+      -mdir=/data
+      -defaultReplication=${SEAWEEDFS_REPLICATION:-000}
+      -volumeSizeLimitMB=${SEAWEEDFS_VOLUME_SIZE_MB:-30000}
+    volumes:
+      - ${SEAWEEDFS_SSD_DIR:-./data/seaweedfs-ssd}/master:/data
+    ports:
+      - "127.0.0.1:9333:9333"   # admin UI (localhost only)
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-latest}
+    profiles: [seaweedfs]
+    restart: unless-stopped
+    entrypoint: ["/usr/bin/weed"]
+    command: >
+      -logtostderr=true volume
+      -mserver=seaweedfs-master:9333
+      -ip=seaweedfs-volume -ip.bind=0.0.0.0 -port=8080
+      -dir=/data -max=0
+    volumes:
+      - ${SEAWEEDFS_HDD_DIR:-./data/seaweedfs-hdd}:/data
+    depends_on: [seaweedfs-master]
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-latest}
+    profiles: [seaweedfs]
+    restart: unless-stopped
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+    # Build the S3 identity file from S3_ACCESS_KEY / S3_SECRET_KEY in .env, then start filer + S3 gateway.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$S3_ACCESS_KEY" ] || [ -z "$$S3_SECRET_KEY" ]; then
+          echo "set S3_ACCESS_KEY / S3_SECRET_KEY in .env" >&2; exit 1
+        fi
+        printf '{"identities":[{"name":"vault","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+          "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json
+        exec /usr/bin/weed -logtostderr=true filer \
+          -master=seaweedfs-master:9333 \
+          -ip=seaweedfs-filer -ip.bind=0.0.0.0 -port=8888 \
+          -defaultStoreDir=/data \
+          -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    volumes:
+      - ${SEAWEEDFS_SSD_DIR:-./data/seaweedfs-ssd}/filer:/data
+    ports:
+      - "127.0.0.1:8888:8888"   # filer file browser (localhost only)
+    depends_on: [seaweedfs-master, seaweedfs-volume]

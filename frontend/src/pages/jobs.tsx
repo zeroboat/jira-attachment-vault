@@ -1,0 +1,274 @@
+import { Link, useNavigate, useParams } from "react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Ban, ChevronLeft, CircleCheck, ListChecks, MessageSquare, Play, TriangleAlert } from "lucide-react";
+
+import { ConfirmButton, EmptyState, FileLink, IssueLink, JobStatusBadge, PageHeader, StateBadge } from "@/components/shared";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/misc";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { api, ApiError, type Job } from "@/lib/api";
+import { useConfig } from "@/lib/config";
+import { label, reasonLabel, t } from "@/lib/i18n";
+import { formatBytes, formatDate, formatNumber } from "@/lib/utils";
+
+export function JobsPage() {
+  const navigate = useNavigate();
+  const { data, isLoading } = useQuery({ queryKey: ["jobs"], queryFn: api.jobs, refetchInterval: 5000 });
+  return (
+    <>
+      <PageHeader title={t("jobs.title")} description={t("jobs.desc")} />
+      <Card className="gap-0 overflow-hidden p-3">
+        {isLoading ? (
+          <Skeleton className="m-4 h-40" />
+        ) : data && data.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>{t("jobs.kind")}</TableHead>
+                <TableHead>{t("jobs.content")}</TableHead>
+                <TableHead className="text-right">{t("jobs.targets")}</TableHead>
+                <TableHead>{t("col.state")}</TableHead>
+                <TableHead>{t("jobs.reqApp")}</TableHead>
+                <TableHead>{t("jobs.created")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((j) => (
+                <TableRow key={j.id} className="cursor-pointer" onClick={() => navigate(`/jobs/${j.id}`)}>
+                  <TableCell className="text-muted-foreground tabular">{j.id}</TableCell>
+                  <TableCell className="font-medium">{label("jobKind", j.kind)}</TableCell>
+                  <TableCell className="max-w-[320px] truncate">{j.title}</TableCell>
+                  <TableCell className="tabular text-right">{j.attachment_count ? formatNumber(j.attachment_count) : ""}</TableCell>
+                  <TableCell>
+                    <JobStatusBadge status={j.status} />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {j.created_by ?? "-"} / {j.approved_by ?? "-"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground tabular">{formatDate(j.created_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <EmptyState icon={ListChecks} title={t("jobs.empty")}>
+            {t("jobs.emptyHint")}
+          </EmptyState>
+        )}
+      </Card>
+    </>
+  );
+}
+
+export function JobDetailPage() {
+  const id = Number(useParams().id);
+  const qc = useQueryClient();
+  const { data: cfg } = useConfig();
+  const { data, isLoading } = useQuery({
+    queryKey: ["job", id],
+    queryFn: () => api.job(id),
+    refetchInterval: (q) => (["approved", "running"].includes(q.state.data?.job.status ?? "") ? 2000 : false),
+  });
+  const onDone = (msg: string) => () => {
+    toast.success(msg);
+    qc.invalidateQueries({ queryKey: ["job", id] });
+    qc.invalidateQueries({ queryKey: ["jobs"] });
+  };
+  const onErr = (e: Error) => toast.error(e instanceof ApiError ? e.message : t("common.requestFailed"));
+  const approve = useMutation({ mutationFn: () => api.approve(id), onSuccess: onDone(t("jobs.approved")), onError: onErr });
+  const cancel = useMutation({ mutationFn: () => api.cancel(id), onSuccess: onDone(t("jobs.cancelled")), onError: onErr });
+
+  if (isLoading || !data) return <Skeleton className="h-96" />;
+  const { job, items, total_bytes } = data;
+  const isCleanup = job.kind === "cleanup";
+
+  return (
+    <>
+      <Button variant="ghost" size="sm" className="text-muted-foreground mb-3 -ml-2" asChild>
+        <Link to="/jobs">
+          <ChevronLeft /> {t("jobs.list")}
+        </Link>
+      </Button>
+      <PageHeader
+        title={t("jobs.heading", { id: job.id, kind: label("jobKind", job.kind) })}
+        description={job.title}
+        actions={
+          <>
+            {(job.status === "pending_approval" || job.status === "approved") && (
+              <Button variant="outline" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                <Ban /> {t("common.cancel")}
+              </Button>
+            )}
+            {job.status === "pending_approval" && (
+              <ConfirmButton
+                variant={isCleanup ? "destructive" : "default"}
+                title={isCleanup ? t("jobs.approveCleanupQ") : t("jobs.approveRestoreQ")}
+                description={
+                  isCleanup
+                    ? cfg?.dry_run
+                      ? t("jobs.dryRunDesc")
+                      : t("jobs.cleanupDesc", {
+                          summary: `${t("jobs.attachments", { n: formatNumber(job.attachment_count) })} · ${formatBytes(total_bytes)}`,
+                        })
+                    : t("jobs.restoreDesc")
+                }
+                confirmLabel={t("jobs.approveRun")}
+                destructive={isCleanup && !cfg?.dry_run}
+                onConfirm={() => approve.mutate()}
+                disabled={approve.isPending}
+              >
+                <Play /> {t("jobs.approveRun")}
+              </ConfirmButton>
+            )}
+          </>
+        }
+      />
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="gap-3 py-5">
+          <CardHeader className="px-5">
+            <CardDescription>{t("jobs.status")}</CardDescription>
+          </CardHeader>
+          <CardContent className="px-5">
+            <JobStatusBadge status={job.status} />
+            <div className="text-muted-foreground mt-3 grid gap-1 text-xs">
+              <span>{t("jobs.requested", { who: job.created_by ?? "-", date: formatDate(job.created_at) })}</span>
+              {job.approved_by && <span>{t("jobs.approvedBy", { who: job.approved_by })}</span>}
+              {job.finished_at && <span>{t("jobs.finished", { date: formatDate(job.finished_at) })}</span>}
+            </div>
+          </CardContent>
+        </Card>
+        {job.attachment_count > 0 && (
+          <Card className="gap-3 py-5">
+            <CardHeader className="px-5">
+              <CardDescription>{t("jobs.targets")}</CardDescription>
+              <CardTitle className="tabular text-2xl">{formatBytes(total_bytes)}</CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground px-5 text-xs">{t("jobs.attachments", { n: formatNumber(job.attachment_count) })}</CardContent>
+          </Card>
+        )}
+        {job.result && <ResultCard job={job} />}
+      </div>
+
+      {items.length > 0 && (
+        <Card className="mt-4 gap-0 pb-3 [&>[data-slot=table-container]]:px-3">
+          <CardHeader className="pb-4">
+            <CardTitle>{t("jobs.targetAtts")}</CardTitle>
+            {job.attachment_count > items.length && <CardDescription>{t("jobs.topN", { n: items.length })}</CardDescription>}
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("col.file")}</TableHead>
+                <TableHead>{t("col.issue")}</TableHead>
+                <TableHead>{t("col.uploaded")}</TableHead>
+                <TableHead className="text-right">{t("col.size")}</TableHead>
+                <TableHead>{t("jobs.currentState")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>
+                    <FileLink a={a} />
+                  </TableCell>
+                  <TableCell>
+                    <IssueLink issueKey={a.issue_key} />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground tabular">{formatDate(a.created_at, false)}</TableCell>
+                  <TableCell className="tabular text-right font-medium">{formatBytes(a.size)}</TableCell>
+                  <TableCell>
+                    <StateBadge state={a.state} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </>
+  );
+}
+
+/** Outcome of the silent notice comments posted to issues */
+function CommentResult({ c }: { c?: { enabled: boolean; ok: number; failed: number; errors: Record<string, string> } }) {
+  if (!c || !c.enabled || (c.ok === 0 && c.failed === 0)) return null;
+  return (
+    <div className="mt-1.5 border-t pt-1.5">
+      <span className="flex items-center gap-1">
+        <MessageSquare className="size-3" /> {t("jobs.comments", { n: c.ok })}
+        {c.failed > 0 && <span className="text-destructive">{t("jobs.commentsFailed", { n: c.failed })}</span>}
+      </span>
+      {Object.entries(c.errors ?? {}).slice(0, 5).map(([key, why]) => (
+        <span key={key} className="text-destructive block">
+          {key}: {why}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ResultCard({ job }: { job: Job }) {
+  const r = job.result!;
+  if (r.error) {
+    return (
+      <Card className="bg-destructive-soft border-transparent gap-3 py-5">
+        <CardHeader className="px-5">
+          <CardDescription className="text-destructive flex items-center gap-1.5">
+            <TriangleAlert className="size-3.5" /> {t("jobs.error")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="px-5 font-mono text-xs break-all">{r.error}</CardContent>
+      </Card>
+    );
+  }
+  if (job.kind === "cleanup") {
+    return (
+      <Card className="gap-3 py-5">
+        <CardHeader className="px-5">
+          <CardDescription className="flex items-center gap-1.5">
+            <CircleCheck className="text-success-ink size-3.5" /> {t("jobs.result")}{r.dry_run ? t("jobs.dryRunTag") : ""}
+          </CardDescription>
+          <CardTitle className="tabular text-2xl">{t("jobs.freed", { size: formatBytes(r.freed_bytes) })}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-muted-foreground grid gap-1 px-5 text-xs">
+          <span>{t("jobs.cleanupSummary", { d: r.deleted, s: r.skipped, f: r.failed })}</span>
+          {Object.entries((r.reasons ?? {}) as Record<string, string[]>).map(([reason, ids]) => (
+            <span key={reason}>
+              {reasonLabel(reason)}: {ids.length}
+            </span>
+          ))}
+          <CommentResult c={r.comments} />
+        </CardContent>
+      </Card>
+    );
+  }
+  if (job.kind === "restore") {
+    return (
+      <Card className="gap-3 py-5">
+        <CardHeader className="px-5">
+          <CardDescription>{t("jobs.result")}</CardDescription>
+          <CardTitle className="text-2xl">{t("jobs.restored", { n: r.restored })}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-muted-foreground grid gap-1 px-5 text-xs">
+          <span>{t("jobs.failed", { n: r.failed })}</span>
+          <CommentResult c={r.comments} />
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card className="gap-3 py-5">
+      <CardHeader className="px-5">
+        <CardDescription>{t("jobs.result")}</CardDescription>
+        <CardTitle className="text-2xl">{t("jobs.issuesChecked", { n: formatNumber(r.sync?.issues) })}</CardTitle>
+      </CardHeader>
+      <CardContent className="text-muted-foreground px-5 text-xs">
+        {t("jobs.syncSummary", { n: r.sync?.new ?? 0, b: r.backup?.ok ?? 0 })}
+      </CardContent>
+    </Card>
+  );
+}
