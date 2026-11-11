@@ -215,6 +215,7 @@ def test_api():
         assert c.get(f"/api/jobs/1/log?after={log[-1]['id']}").json() == []
         assert c.post("/api/sync", json={"full": True}).status_code == 200
         assert c.post("/api/sync", json={}).status_code == 409
+        assert c.get("/api/settings/storage-check").json() == {"ok": True}
         # settings: token is write-only and stored encrypted; changes are audited
         st = c.get("/api/settings").json()
         assert st["jira_base_url"] == "https://example.atlassian.net" and "jira_api_token" not in st

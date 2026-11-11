@@ -22,7 +22,7 @@ from .schemas import (AppConfig, AttachmentDetail, AttachmentOut, AuditOut,
                       CleanupPreview, Dashboard, JobDetail, JobLogOut, JobOut, LoginIn,
                       JiraTestIn, ManualCleanupIn, Page, PasswordIn, PolicyIn, ProjectUsage,
                       SettingsIn, SettingsOut, SyncIn, SyncInfo, Totals)
-from .storage import get_storage
+from .storage import get_storage, make_storage
 
 
 @asynccontextmanager
@@ -77,7 +77,7 @@ def config(user: str = Depends(auth.require_user)):
 # ---------- settings ----------
 def _settings_out() -> SettingsOut:
     return SettingsOut(**settings_store.public_values(), storage_backend=settings.storage_backend,
-                       storage_location=get_storage().describe(),
+                       storage_location=make_storage(settings.storage_backend, check_only=True).describe(),
                        secret_key_ephemeral=settings.secret_key_ephemeral)
 
 
@@ -100,9 +100,9 @@ def put_settings(body: SettingsIn, db=Depends(get_db), user: str = Depends(auth.
 
 @api.get("/settings/storage-check")
 def storage_check():
-    """Read-only reachability probe of the backup storage (a HEAD on a key that needn't exist)."""
+    """Local: write+delete a temp file. S3: HEAD the bucket with short timeouts. Never creates the bucket."""
     try:
-        get_storage().exists("manifest/.probe")
+        make_storage(settings.storage_backend, check_only=True).probe()
     except Exception as exc:  # noqa: BLE001 - any failure is reported, never raised
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
     return {"ok": True}

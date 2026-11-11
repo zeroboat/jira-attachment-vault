@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 import tempfile
+import time
 
 import pytest
 
@@ -96,3 +97,28 @@ def test_dry_run(tmp_path, s3_endpoint):
     sw = _seaweed_like(s3_endpoint, "vault-dry")
     assert copy_all(local, sw, dry_run=True)["copied"] == 1
     assert list(sw.list_keys()) == []
+
+
+def test_probe(tmp_path, s3_endpoint):
+    local = LocalStorage(str(tmp_path / "p"))
+    local.probe()
+    assert list(local.list_keys()) == []  # probe leaves nothing behind
+    os.chmod(local.root, 0o500)
+    try:
+        if os.geteuid() != 0:  # root ignores permissions
+            with pytest.raises(OSError):
+                local.probe()
+    finally:
+        os.chmod(local.root, 0o700)
+
+    _seaweed_like(s3_endpoint, "vault-probe").probe()  # created by the normal constructor
+    missing = S3Storage(name="seaweedfs", endpoint_url=s3_endpoint, bucket="vault-nope", region="us-east-1",
+                        access_key="test", secret_key="test", create_bucket=False, fast_fail=True)
+    with pytest.raises(Exception):
+        missing.probe()
+    dead = S3Storage(name="seaweedfs", endpoint_url="http://127.0.0.1:9", bucket="b", region="us-east-1",
+                     access_key="test", secret_key="test", create_bucket=False, fast_fail=True)
+    start = time.monotonic()
+    with pytest.raises(Exception):
+        dead.probe()
+    assert time.monotonic() - start < 10
