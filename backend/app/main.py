@@ -98,6 +98,16 @@ def put_settings(body: SettingsIn, db=Depends(get_db), user: str = Depends(auth.
     return _settings_out()
 
 
+@api.get("/settings/storage-check")
+def storage_check():
+    """Read-only reachability probe of the backup storage (a HEAD on a key that needn't exist)."""
+    try:
+        get_storage().exists("manifest/.probe")
+    except Exception as exc:  # noqa: BLE001 - any failure is reported, never raised
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    return {"ok": True}
+
+
 @api.post("/settings/test-jira")
 def test_jira(body: JiraTestIn):
     url = body.jira_base_url.strip().rstrip("/")

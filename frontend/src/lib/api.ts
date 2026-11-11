@@ -211,6 +211,7 @@ export const api = {
   audit: () => request<AuditEntry[]>("GET", "/audit"),
   settings: () => request<Settings>("GET", "/settings"),
   saveSettings: (s: SettingsUpdate) => request<Settings>("PUT", "/settings", s),
+  storageCheck: () => request<{ ok: boolean; error?: string }>("GET", "/settings/storage-check"),
   testJira: (s: { jira_base_url: string; jira_email: string; jira_api_token: string }) =>
     request<{ ok: boolean; account?: string; error?: string }>("POST", "/settings/test-jira", s),
   changePassword: (current: string, next: string) => request<{ ok: boolean }>("POST", "/auth/password", { current, new: next }),

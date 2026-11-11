@@ -117,6 +117,7 @@ API 토큰은 `SECRET_KEY`로 암호화해 저장하고, 브라우저로 다시 
 | `DB_DIR` | `./data/postgres` | PostgreSQL 데이터 경로 |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | | `seaweedfs` / `s3` 모드에서 필수 |
 | `S3_BUCKET` | `jira-attachments` | 버킷 이름 |
+| `S3_PREFIX` | | 버킷 안 키 접두어 (선택) |
 | `S3_ENDPOINT_URL` | seaweedfs: `http://seaweedfs-filer:8333` | S3 호환 저장소 주소 |
 | `S3_REGION` | `us-east-1` | 리전 |
 | `COMPOSE_PROFILES` | | `seaweedfs`로 두면 `docker compose up -d`만으로 SeaweedFS도 함께 떠요 |

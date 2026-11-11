@@ -288,14 +288,38 @@ export function SettingsPage() {
               <CardDescription>{t("settings.storageDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 text-sm">
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">{data.storage_backend}</Badge>
+                <StorageStatus />
               </div>
               <div className="text-muted-foreground font-mono text-xs break-all">{data.storage_location}</div>
             </CardContent>
           </Card>
         </div>
       </div>
+    </>
+  );
+}
+
+function StorageStatus() {
+  const { data, isFetching, refetch } = useQuery({ queryKey: ["storage-check"], queryFn: api.storageCheck, retry: false });
+  return (
+    <>
+      {isFetching ? (
+        <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+      ) : data?.ok ? (
+        <span className="text-success-ink flex items-center gap-1 text-xs">
+          <CircleCheck className="size-3.5" /> {t("settings.storageOk")}
+        </span>
+      ) : (
+        <span className="text-destructive text-xs" title={data?.error}>
+          {t("settings.storageFail")}
+        </span>
+      )}
+      <Button type="button" variant="ghost" size="sm" className="ml-auto h-7" onClick={() => refetch()} disabled={isFetching}>
+        {t("settings.storageRecheck")}
+      </Button>
+      {data && !data.ok && !isFetching && <div className="text-destructive basis-full font-mono text-xs break-all">{data.error}</div>}
     </>
   );
 }

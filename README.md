@@ -118,6 +118,7 @@ and never sent back to the browser.
 | `DB_DIR` | `./data/postgres` | PostgreSQL data directory |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | | Required for `seaweedfs` / `s3` |
 | `S3_BUCKET` | `jira-attachments` | Bucket name |
+| `S3_PREFIX` | | Optional key prefix inside the bucket |
 | `S3_ENDPOINT_URL` | seaweedfs: `http://seaweedfs-filer:8333` | Endpoint for S3-compatible storage |
 | `S3_REGION` | `us-east-1` | Region |
 | `COMPOSE_PROFILES` | | Set `seaweedfs` so plain `docker compose up -d` starts SeaweedFS too |
