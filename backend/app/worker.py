@@ -6,15 +6,14 @@ import logging
 import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from . import settings_store
 from .config import settings
-from .db import Job, SessionLocal, get_state, init_db, set_state, utcnow
+from .db import Job, JobLog, SessionLocal, get_state, init_db, set_state, utcnow
 from .jira import JiraClient
 from .jobs import run_job
 from .storage import get_storage
-from .sync import backup_pending, sync
 
 log = logging.getLogger("worker")
 
@@ -40,16 +39,26 @@ def tick(storage, last_cycle: float) -> float:
 
         if time.time() - last_cycle < settings.sync_interval_minutes * 60:
             return last_cycle
-        try:
-            sync(s, client, full=_full_due(s))
-            backup_pending(s, client, storage)
+        # Run as a job so it shows up (with its log) on the Jobs page and blocks "Sync now" while running.
+        job = Job(kind="full_sync" if _full_due(s) else "sync", status="approved", title="Automatic sync",
+                  created_by="system", approved_by="system", params={}, attachment_ids=[])
+        s.add(job)
+        s.commit()
+        run_job(s, client, storage, job)
+        if job.status == "failed":
+            set_state(s, "last_error", f"{utcnow().isoformat()} {job.result['error']}"[:2000])
+        else:
             set_state(s, "last_error", None)
-        except Exception as exc:  # noqa: BLE001
-            s.rollback()
-            log.exception("Periodic sync failed")
-            set_state(s, "last_error", f"{utcnow().isoformat()} {type(exc).__name__}: {exc}"[:2000])
+            if _quiet(job.result):  # nothing happened: don't fill the Jobs page every interval
+                s.execute(delete(JobLog).where(JobLog.job_id == job.id))
+                s.delete(job)
         s.commit()
         return time.time()
+
+
+def _quiet(result: dict) -> bool:
+    sy, b = result["sync"], result["backup"]
+    return not (sy["new"] or sy["reappeared"] or sy["missing"] or b["ok"] or b["failed"] or b["missing"])
 
 
 def main() -> None:

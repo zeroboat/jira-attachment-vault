@@ -350,3 +350,32 @@ if __name__ == "__main__":
     test_silent_comment_request()
     test_jql()
     print("ALL OK")
+
+
+def test_periodic_sync_is_a_job(monkeypatch):
+    """The worker's interval sync runs as a job with a log; a cycle where nothing happened leaves no job."""
+    from sqlalchemy import select
+    from app import worker
+    from app.db import JobLog
+    init_db()
+    jira = FakeJira()
+    jira.files["700"] = b"periodic"  # a file earlier tests haven't backed up
+    jira.issues.append(jira._issue("70", "OPS-70", "done", [("700", "p.txt", "2024-01-01T09:00:00.000+0900")]))
+    monkeypatch.setattr(worker, "JiraClient", lambda: jira)
+    storage = get_storage()
+    with SessionLocal() as s:
+        before = s.scalar(select(Job.id).order_by(Job.id.desc()).limit(1)) or 0
+    with SessionLocal() as s:  # earlier tests leave queued jobs; the worker would run those first
+        for j in s.scalars(select(Job).where(Job.status == "approved")):
+            j.status = "cancelled"
+        s.commit()
+    worker.tick(storage, 0.0)
+    with SessionLocal() as s:
+        jobs = s.scalars(select(Job).where(Job.id > before)).all()
+        assert len(jobs) == 1 and jobs[0].title == "Automatic sync" and jobs[0].status == "done"
+        events = [r.event for r in s.scalars(select(JobLog).where(JobLog.job_id == jobs[0].id))]
+        assert events[0] == "sync_started" and "backed_up" in events and events[-1] == "job_done"
+    worker.tick(storage, 0.0)  # nothing new → no job kept
+    with SessionLocal() as s:
+        assert s.scalar(select(Job.id).order_by(Job.id.desc()).limit(1)) == jobs[0].id
+        assert not s.scalars(select(JobLog).where(JobLog.job_id > jobs[0].id)).all()

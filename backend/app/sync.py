@@ -60,6 +60,7 @@ def sync(session, client: JiraClient, full: bool = False, job_id: int | None = N
     jql = build_jql(since)
     log.info("Sync started (full=%s): %s", full, jql)
     job_log(session, job_id, "sync_started", full=full, jql=jql)
+    session.commit()  # make the job log visible before the first (possibly slow) Jira page
 
     stats = {"issues": 0, "new": 0, "updated": 0, "reappeared": 0, "missing": 0, "full": full}
     for issue in client.search_issues(jql):
@@ -98,6 +99,7 @@ def sync(session, client: JiraClient, full: bool = False, job_id: int | None = N
             obj.last_seen_at = started
         if stats["issues"] % 50 == 0:
             job_log(session, job_id, "sync_progress", issues=stats["issues"])
+        if stats["issues"] % 10 == 0:  # flush "found" lines so the job log updates while it runs
             session.commit()
 
     if full:
@@ -171,6 +173,7 @@ def backup_pending(session, client: JiraClient, storage: Storage, limit: int | N
     stats = {"ok": 0, "failed": 0, "bytes": 0, "missing": 0}
     todo = session.scalars(q).all()
     job_log(session, job_id, "backup_started", count=len(todo))
+    session.commit()
     for obj in todo:
         obj.backup_attempts = (obj.backup_attempts or 0) + 1
         try:
