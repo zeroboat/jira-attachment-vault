@@ -70,5 +70,10 @@ class Settings:
         # (web) If true, cleanup jobs only log what they would delete and never delete from Jira.
         self.dry_run = _bool(e("DRY_RUN"), default=True)
 
+    def ensure_tmp_dir(self) -> None:
+        """TMP_DIR (e.g. /vault/.tmp) sits inside a bind mount that starts empty; mkstemp won't create it."""
+        if self.tmp_dir:
+            os.makedirs(self.tmp_dir, exist_ok=True)
+
 
 settings = Settings()

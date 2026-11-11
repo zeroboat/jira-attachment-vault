@@ -55,6 +55,7 @@ def tick(storage, last_cycle: float) -> float:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     init_db()
+    settings.ensure_tmp_dir()
     with SessionLocal() as s:
         settings_store.seed_from_env(s)
         settings_store.load(s)

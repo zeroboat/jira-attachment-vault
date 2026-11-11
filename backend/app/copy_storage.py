@@ -61,6 +61,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.src == args.dst:
         ap.error("--from and --to are the same")
+    settings.ensure_tmp_dir()
     src, dst = make_storage(args.src), make_storage(args.dst)
     log.info("%s → %s%s", src.describe(), dst.describe(), " (dry-run)" if args.dry_run else "")
     stats = copy_all(src, dst, dry_run=args.dry_run)
