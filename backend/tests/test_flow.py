@@ -325,6 +325,13 @@ def test_silent_comment_request():
     finally:
         settings.jira_comment_lang = "en"
 
+    # Jira's own 400 reason is shown
+    from app.jira import JiraError
+    from app.notice import _reason
+    err = JiraError('PUT https://x/rest/api/3/issue/9 -> 400: {"errorMessages":[],"errors":{"commentLevel":"not a member: R"}}', 400)
+    assert _reason(err) == "Request rejected: not a member: R"
+    assert _reason(JiraError("PUT https://x -> 400: <html>", 400)) == "Request rejected (400)"
+
 
 def test_jql():
     from app.config import settings

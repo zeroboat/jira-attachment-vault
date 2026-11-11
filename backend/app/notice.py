@@ -10,6 +10,7 @@ than posted in a way that notifies people.
 Comment language: the approver's UI language (saved on the job at approval);
 JIRA_COMMENT_LANG (default en) is the fallback.
 """
+import json
 import logging
 from collections import OrderedDict
 from datetime import datetime
@@ -131,7 +132,13 @@ def _reason(exc: Exception) -> str:
     if status == 404:
         return "Issue not found"
     if status == 400:
-        return "Request rejected (400)"
+        # show Jira's own reason, e.g. the API account isn't in the comment's role
+        try:
+            body = json.loads(str(exc).split(": ", 1)[1])
+            msgs = list(body.get("errors", {}).values()) + body.get("errorMessages", [])
+        except (IndexError, ValueError, AttributeError):
+            msgs = []
+        return ("Request rejected: " + " ".join(map(str, msgs)))[:300] if msgs else "Request rejected (400)"
     return f"Error: {type(exc).__name__}"
 
 
