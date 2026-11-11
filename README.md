@@ -6,10 +6,11 @@ A standalone web tool that **backs up Jira Cloud attachments to your own server*
 
 - **Sync**: every 30 minutes, attachment lists of changed issues are written to the DB. Once a day a full reconcile finds attachments that disappeared from Jira.
 - **Backup**: new attachments are downloaded and stored by sha256. Identical files are stored once.
-- **Cleanup**: preview targets by rules (age, size, project, done issues, file type), create a job, and it runs **only after approval**.
+- **Cleanup**: preview targets by rules (age, size, project, done issues, file type), or hand-pick attachments on the Attachments page, create a job, and it runs **only after approval**.
 - **Restore**: re-upload cleaned-up attachments to their original issue.
+- **Job log**: every job keeps a step-by-step log (per file: backed up, deleted, skipped and why, failed, notice comments).
 - **Audit log**: who did what, and when.
-- **Language**: the UI is English by default. Switch to Korean from the user menu (top right) or below the login form. The choice is stored in the browser.
+- **Language**: the UI is English by default. Switch to Korean on the Settings page, from the user menu (top right) or below the login form. The choice is stored in the browser.
 
 ## Stack
 
@@ -24,7 +25,7 @@ A standalone web tool that **backs up Jira Cloud attachments to your own server*
 jira-attachment-vault/
 ├── frontend/                 React app
 │   └── src/
-│       ├── pages/            dashboard, attachments, cleanup, jobs, audit, login
+│       ├── pages/            dashboard, attachments, cleanup, jobs, audit, settings, login
 │       ├── components/ui/    shadcn/ui components
 │       ├── components/       layout, shared components
 │       ├── lib/api.ts        API types and calls
@@ -33,6 +34,7 @@ jira-attachment-vault/
 │   ├── app/
 │   │   ├── main.py           JSON API + serves the built frontend
 │   │   ├── auth.py           cookie session login
+│   │   ├── settings_store.py settings saved from the web UI (DB)
 │   │   ├── schemas.py        API request/response models
 │   │   ├── sync.py           Jira → DB sync, backup
 │   │   ├── jobs.py           cleanup/restore jobs and safeguards
@@ -104,11 +106,6 @@ notice comments (on/off), sync intervals, dry run, and the admin password are ch
 Changes apply without a restart and are recorded in the Audit log. The API token is encrypted with `SECRET_KEY`
 and never sent back to the browser.
 
-For automated installs you can still put `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECTS`,
-`JIRA_EXTRA_JQL`, `JIRA_USER_TIMEZONE`, `JIRA_COMMENT`, `JIRA_COMMENT_LANG`, `SYNC_INTERVAL_MINUTES`,
-`FULL_RECONCILE_HOURS` or `DRY_RUN` in `.env`: they are copied into the DB **on first start only**.
-After that, the Settings page is the source of truth.
-
 **`.env` (server and infrastructure).** `.env.example` lists the required values. Optional:
 
 | Variable | Default | Description |
@@ -128,6 +125,7 @@ After that, the Settings page is the source of truth.
 | `SEAWEEDFS_HDD_DIR` | `./data/seaweedfs-hdd` | HDD path for file content |
 | `SEAWEEDFS_TAG` | `latest` | SeaweedFS image tag. Pin a version in production |
 | `SEAWEEDFS_REPLICATION` | `000` | `000` = no replication |
+| `SEAWEEDFS_VOLUME_SIZE_MB` | `30000` | Size limit of one SeaweedFS volume file |
 
 ## Choosing storage
 
@@ -178,13 +176,13 @@ The reverse direction (`--from seaweedfs --to local`) works the same way.
 ## Starting cleanup safely
 
 1. With dry run on (the default; toggle on the Settings page), create and approve a cleanup job. Nothing is deleted; only **what would have been deleted** is logged.
-2. Review the job result and the Audit log page.
+2. Review the job result, its log, and the Audit log page.
 3. If it looks right, turn dry run off on the Settings page. It takes effect immediately.
 
 A cleanup job processes each attachment in this order:
 1. Back it up first if there is no backup.
 2. **Re-read the stored file in full and verify its sha256.** Skip on mismatch.
-3. Skip images embedded in descriptions/comments as `!filename!` (optional), since deleting them shows "preview unavailable" in Jira.
+3. Skip images embedded in descriptions/comments as `!filename!` (on by default; can be turned off per job), since deleting them shows "preview unavailable" in Jira.
 4. Delete it from Jira.
 
 ## Jira notice comments (silent)
@@ -201,19 +199,21 @@ Comments are written in the UI language of the person who approved the job (Engl
 >
 > Cleanup job #4 · 2026-11-09 21:10 · Archive IDs `10103, 10141`
 
-- **No notifications are sent.** The Jira Cloud comment API can't suppress notifications, so the comment is sent through the issue edit API (`PUT /rest/api/3/issue/{key}?notifyUsers=false`). This requires **Administer Projects** (or Administer Jira) on the API account.
-- **Without that permission the comment is skipped**, never posted in a way that notifies people. The job result shows "Permission denied".
+- **No Jira notifications are sent.** The Jira Cloud comment API can't suppress notifications, so the comment is sent through the issue edit API (`PUT /rest/api/3/issue/{key}?notifyUsers=false`). This requires **Administer Projects** (or Administer Jira) on the API account.
+- **Without that permission the comment is skipped**, never posted in a way that notifies people. The job result and log show "Permission denied".
 - No web link is included, only a note to ask an administrator.
 - Not posted in dry run, nor for backups.
 - In JSM projects the comment is requested as an internal note, hidden from customers.
-- Language (English/Korean) and on/off are on the Settings page.
+- Turn them on/off on the Settings page. If a comment fails, the job log shows Jira's reason.
+- **Jira Cloud for Slack still notifies.** The Slack app ignores `notifyUsers=false`, so Slack subscribers may get both the comment and the attachment change. There is no API to mute it; adjust the Slack subscription (`/jira manage`, `/jira notify`) if needed.
 
 **Verify once before relying on it.** Notifications depend on each project's notification scheme, so test in a test project:
 1. Upload a large attachment to a test issue and add yourself as a watcher.
-2. With dry run off, create and approve a cleanup job targeting only that issue (e.g. by file name).
+2. With dry run off, select only that attachment on the Attachments page, create a delete job and approve it.
 3. Check email/Jira notifications.
    - There should be **no comment notification**.
    - An **attachment deletion notification may arrive.** The delete API has no option to suppress it; it follows the "Issue Updated" event in the notification scheme.
+   - If Jira Cloud for Slack is connected, Slack notifications arrive regardless (see above).
 4. For JSM projects, also check the comment isn't visible on the customer portal (internal note).
 
 ## Backing up the backup
@@ -247,7 +247,7 @@ Set `STORAGE_BACKEND=s3` with `S3_ENDPOINT_URL` and `S3_*` to store in AWS S3, C
 
 - **Restoring changes the uploader and upload time** to the API account and restore time (Jira API constraint). The originals stay in this tool's DB and manifest.
 - A restored attachment gets a new id in Jira. It shows up as a new entry on the next sync and, having the same content, uses no extra disk.
-- Full reconcile only looks within the current scope (`JIRA_PROJECTS`, `JIRA_EXTRA_JQL`). Narrowing the scope marks attachments outside it as "Gone from Jira" (backups are kept).
+- Full reconcile only looks within the current scope (Projects and Extra JQL on the Settings page). Narrowing the scope marks attachments outside it as "Gone from Jira" (backups are kept).
 - Login is a single admin account (signed HttpOnly cookie session). Keep it on the internal network; to expose it, put a reverse proxy with SSO in front.
 - API error messages from the backend are in English regardless of the UI language.
 
