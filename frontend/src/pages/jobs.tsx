@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, ApiError, type Job, type JobLogLine, type JobProgress } from "@/lib/api";
+import { api, ApiError, can, type Job, type JobLogLine, type JobProgress } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { label, reasonLabel, t, type Key } from "@/lib/i18n";
 import { cn, formatBytes, formatDate, formatNumber } from "@/lib/utils";
@@ -98,12 +98,12 @@ export function JobDetailPage() {
         description={job.title}
         actions={
           <>
-            {(job.status === "pending_approval" || job.status === "approved") && (
+            {(job.status === "pending_approval" || job.status === "approved") && (can(cfg?.role, "approver") || job.created_by === cfg?.user) && (
               <Button variant="outline" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
                 <Ban /> {t("common.cancel")}
               </Button>
             )}
-            {job.status === "pending_approval" && (
+            {job.status === "pending_approval" && can(cfg?.role, "approver") && (
               <ConfirmButton
                 variant={isCleanup ? "destructive" : "default"}
                 title={isCleanup ? t("jobs.approveCleanupQ") : t("jobs.approveRestoreQ")}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleCheck, HardDrive, KeyRound, Languages, LoaderCircle, Plug, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleCheck, HardDrive, KeyRound, Languages, LoaderCircle, Plug, ShieldAlert, ShieldCheck, TriangleAlert, UserPlus, Users } from "lucide-react";
 
 import { ConfirmButton, PageHeader } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/misc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, ApiError, type Settings } from "@/lib/api";
+import { api, ApiError, can, ROLES, type Role, type Settings } from "@/lib/api";
 import { chooseLang, useConfig } from "@/lib/config";
 import { lang, LANGS, t, type Lang } from "@/lib/i18n";
 
@@ -102,6 +102,7 @@ export function SettingsPage() {
   });
 
   if (!data || !form) return <Skeleton className="h-96" />;
+  const isAdmin = can(cfg?.role, "admin");
   const set = (patch: Partial<Form>) => {
     setForm({ ...form, ...patch });
     test.reset();
@@ -135,6 +136,12 @@ export function SettingsPage() {
             save.mutate(form);
           }}
         >
+          {!isAdmin && (
+            <div className="bg-muted text-muted-foreground flex gap-2 rounded-md p-3 text-sm">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0" /> {t("settings.adminOnly")}
+            </div>
+          )}
+          <fieldset disabled={!isAdmin} className="grid min-w-0 gap-4">
           <Card>
             <CardHeader>
               <CardTitle>{t("settings.jira")}</CardTitle>
@@ -226,14 +233,15 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          <div className="flex justify-end gap-2">
+          </fieldset>
+          {isAdmin && <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setForm(toForm(data))} disabled={save.isPending}>
               {t("settings.reset")}
             </Button>
             <Button type="submit" disabled={save.isPending}>
               {save.isPending && <LoaderCircle className="animate-spin" />} {t("settings.save")}
             </Button>
-          </div>
+          </div>}
         </form>
 
         <div className="grid content-start gap-4">
@@ -268,7 +276,7 @@ export function SettingsPage() {
               </CardTitle>
               <CardDescription>{data.dry_run ? t("settings.dryRunOn") : t("settings.dryRunOff")}</CardDescription>
             </CardHeader>
-            <CardContent>
+            {isAdmin && <CardContent>
               {data.dry_run ? (
                 <ConfirmButton
                   variant="destructive"
@@ -287,10 +295,12 @@ export function SettingsPage() {
                   {t("settings.dryRunOnBtn")}
                 </Button>
               )}
-            </CardContent>
+            </CardContent>}
           </Card>
 
           <PasswordCard />
+
+          {isAdmin && <UsersCard />}
 
           <Card>
             <CardHeader>
@@ -333,6 +343,149 @@ function StorageStatus() {
       </Button>
       {data && !data.ok && !isFetching && <div className="text-destructive basis-full font-mono text-xs break-all">{data.error}</div>}
     </>
+  );
+}
+
+function UsersCard() {
+  const qc = useQueryClient();
+  const { data: users } = useQuery({ queryKey: ["users"], queryFn: api.users });
+  const [name, setName] = useState("");
+  const [pw, setPw] = useState("");
+  const [role, setRole] = useState<Role>("viewer");
+  const [resetFor, setResetFor] = useState<string | null>(null);
+  const [resetPw, setResetPw] = useState("");
+  const done = (msg: string) => () => {
+    qc.invalidateQueries({ queryKey: ["users"] });
+    toast.success(msg);
+  };
+  const add = useMutation({
+    mutationFn: () => api.createUser(name.trim(), pw, role),
+    onSuccess: () => {
+      setName("");
+      setPw("");
+      done(t("users.added"))();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  const changeRole = useMutation({
+    mutationFn: ({ u, r }: { u: string; r: Role }) => api.setRole(u, r),
+    onSuccess: done(t("users.roleChanged")),
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  const remove = useMutation({ mutationFn: api.deleteUser, onSuccess: done(t("users.removed")), onError: (e) => toast.error(errMsg(e)) });
+  const reset = useMutation({
+    mutationFn: () => api.resetPassword(resetFor!, resetPw),
+    onSuccess: () => {
+      setResetFor(null);
+      setResetPw("");
+      done(t("users.resetDone"))();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="size-4" /> {t("users.title")}
+        </CardTitle>
+        <CardDescription>{t("users.desc")}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <ul className="grid gap-2">
+          {users?.map((u) => (
+            <li key={u.username} className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-medium">{u.username}</span>
+                {u.builtin ? (
+                  <Badge variant="secondary">{t("users.builtin")}</Badge>
+                ) : (
+                  <RoleSelect value={u.role} onChange={(r) => changeRole.mutate({ u: u.username, r })} disabled={changeRole.isPending} />
+                )}
+                {!u.builtin && (
+                  <span className="ml-auto flex gap-1">
+                    <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setResetFor(resetFor === u.username ? null : u.username)}>
+                      {t("users.reset")}
+                    </Button>
+                    <ConfirmButton
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive h-7"
+                      title={t("users.removeQ", { name: u.username })}
+                      description={t("users.removeDesc")}
+                      confirmLabel={t("users.remove")}
+                      destructive
+                      onConfirm={() => remove.mutate(u.username)}
+                      disabled={remove.isPending}
+                    >
+                      {t("users.remove")}
+                    </ConfirmButton>
+                  </span>
+                )}
+              </div>
+              {resetFor === u.username && (
+                <form
+                  className="flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    reset.mutate();
+                  }}
+                >
+                  <Input
+                    type="password"
+                    value={resetPw}
+                    onChange={(e) => setResetPw(e.target.value)}
+                    placeholder={t("users.resetPrompt", { name: u.username })}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                  <Button type="submit" variant="outline" disabled={reset.isPending || resetPw.length < 8}>
+                    {t("settings.save")}
+                  </Button>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
+        <form
+          className="grid gap-2 border-t pt-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add.mutate();
+          }}
+        >
+          <Field label={t("users.username")}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" pattern="[A-Za-z0-9._@\-]{2,64}" required />
+          </Field>
+          <Field label={t("users.password")} hint={t("settings.passwordHint")}>
+            <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" minLength={8} required />
+          </Field>
+          <Field label={t("users.role")} hint={t("users.roleHint")}>
+            <RoleSelect value={role} onChange={setRole} />
+          </Field>
+          <Button type="submit" variant="outline" disabled={add.isPending || pw.length < 8 || name.trim().length < 2}>
+            <UserPlus /> {t("users.add")}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RoleSelect({ value, onChange, disabled }: { value: Role; onChange: (r: Role) => void; disabled?: boolean }) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as Role)} disabled={disabled}>
+      <SelectTrigger size="sm" className="bg-background h-7 w-auto" aria-label={t("users.role")}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {ROLES.map((r) => (
+          <SelectItem key={r} value={r}>
+            {t(`role.${r}`)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

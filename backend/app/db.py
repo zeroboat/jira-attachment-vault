@@ -109,6 +109,17 @@ class JobLog(Base):
     data: Mapped[dict | None] = mapped_column(JSON)
 
 
+class User(Base):
+    """Extra login accounts. The built-in admin (ADMIN_USER) is not stored here."""
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    role: Mapped[str] = mapped_column(String(16), default="viewer")  # viewer | approver | admin
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 
@@ -168,6 +179,6 @@ def job_log(session, job_id: int | None, event: str, att: "Attachment | None" = 
                        issue_key=att.issue_key if att else None))
 
 
-__all__ = ["Attachment", "Job", "JobLog", "AuditLog", "job_log", "SyncState", "SessionLocal", "engine",
+__all__ = ["Attachment", "Job", "JobLog", "User", "AuditLog", "job_log", "SyncState", "SessionLocal", "engine",
            "init_db", "get_state", "set_state", "audit", "utcnow", "as_utc", "select",
            "ACTIVE", "DELETED_BY_VAULT", "MISSING_IN_JIRA", "RESTORED"]

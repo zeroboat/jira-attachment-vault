@@ -125,7 +125,20 @@ export interface AppConfig {
   timezone: string;
   storage_backend: string;
   jira_configured: boolean;
+  role: Role;
   lang: string;
+}
+
+export type Role = "viewer" | "approver" | "admin";
+export const ROLES: Role[] = ["viewer", "approver", "admin"];
+export const can = (have: Role | undefined, need: Role) => !!have && ROLES.indexOf(have) >= ROLES.indexOf(need);
+
+export interface AppUser {
+  username: string;
+  role: Role;
+  builtin: boolean;
+  created_by: string | null;
+  created_at: string | null;
 }
 
 export interface Settings {
@@ -222,5 +235,11 @@ export const api = {
   storageCheck: () => request<{ ok: boolean; error?: string }>("GET", "/settings/storage-check"),
   testJira: (s: { jira_base_url: string; jira_email: string; jira_api_token: string }) =>
     request<{ ok: boolean; account?: string; error?: string }>("POST", "/settings/test-jira", s),
+  users: () => request<AppUser[]>("GET", "/users"),
+  createUser: (username: string, password: string, role: Role) => request<AppUser>("POST", "/users", { username, password, role }),
+  setRole: (username: string, role: Role) => request<AppUser>("PUT", `/users/${encodeURIComponent(username)}/role`, { role }),
+  deleteUser: (username: string) => request<{ ok: boolean }>("DELETE", `/users/${encodeURIComponent(username)}`),
+  resetPassword: (username: string, next: string) =>
+    request<{ ok: boolean }>("PUT", `/users/${encodeURIComponent(username)}/password`, { new: next }),
   changePassword: (current: string, next: string) => request<{ ok: boolean }>("POST", "/auth/password", { current, new: next }),
 };

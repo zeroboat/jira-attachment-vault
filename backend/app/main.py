@@ -14,14 +14,14 @@ from sqlalchemy import func, or_, select
 from . import auth, settings_store
 from .config import settings
 from .db import (ACTIVE, DELETED_BY_VAULT, MISSING_IN_JIRA, Attachment,
-                 AuditLog, Job, JobLog, SessionLocal, audit, get_state, init_db)
+                 AuditLog, Job, JobLog, SessionLocal, User, audit, get_state, init_db)
 from .jira import JiraClient, JiraError
 from .jobs import (Policy, job_progress, candidates_query, candidates_summary,
                    create_cleanup_job, create_manual_cleanup_job, create_restore_job)
 from .schemas import (AppConfig, AttachmentDetail, AttachmentOut, AuditOut,
                       CleanupPreview, Dashboard, JobDetail, JobLogOut, JobOut, LoginIn,
-                      JiraTestIn, ManualCleanupIn, Page, PasswordIn, PolicyIn, ProjectUsage,
-                      SettingsIn, SettingsOut, SyncIn, SyncInfo, Totals)
+                      JiraTestIn, ManualCleanupIn, Page, PasswordIn, PasswordResetIn, PolicyIn, ProjectUsage, RoleIn,
+                      SettingsIn, SettingsOut, SyncIn, SyncInfo, Totals, UserIn, UserOut)
 from .storage import get_storage, make_storage
 
 
@@ -71,7 +71,8 @@ api = APIRouter(prefix="/api", dependencies=[Depends(auth.require_user)])
 def config(user: str = Depends(auth.require_user)):
     return AppConfig(user=user, dry_run=settings.dry_run, jira_base_url=settings.jira_base_url,
                      timezone=settings.jira_user_timezone, storage_backend=settings.storage_backend,
-                     jira_configured=settings_store.jira_configured(), lang=settings.jira_comment_lang)
+                     jira_configured=settings_store.jira_configured(), lang=settings.jira_comment_lang,
+                     role=auth.role_of(user))
 
 
 # ---------- settings ----------
@@ -88,6 +89,9 @@ def get_settings():
 
 @api.put("/settings", response_model=SettingsOut)
 def put_settings(body: SettingsIn, db=Depends(get_db), user: str = Depends(auth.require_user)):
+    # Anyone may switch the app language; everything else (incl. dry run) is admin-only.
+    if body.model_dump(exclude_none=True).keys() - {"jira_comment_lang"} and not auth.can(user, "admin"):
+        raise HTTPException(403, "Your role doesn't allow this.")
     changed = settings_store.save(db, body.model_dump(exclude_none=True))
     if changed:
         detail = {"keys": changed}
@@ -108,7 +112,7 @@ def storage_check():
     return {"ok": True}
 
 
-@api.post("/settings/test-jira")
+@api.post("/settings/test-jira", dependencies=[Depends(auth.require_admin)])
 def test_jira(body: JiraTestIn):
     url = body.jira_base_url.strip().rstrip("/")
     if url and url != settings.jira_base_url and not body.jira_api_token:
@@ -129,10 +133,67 @@ def test_jira(body: JiraTestIn):
 
 @api.post("/auth/password")
 def change_password(body: PasswordIn, db=Depends(get_db), user: str = Depends(auth.require_user)):
-    if not settings_store.check_password(body.current):
+    if not auth.check_password(user, body.current):
         raise HTTPException(400, "Current password is incorrect.")
-    settings_store.set_password(db, body.new)
+    if auth.is_admin(user):
+        settings_store.set_password(db, body.new)
+    else:
+        db.get(User, user).password_hash = settings_store.hash_password(body.new)
     audit(db, user, "password_changed")
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- users (the built-in admin manages them) ----------
+@api.get("/users", response_model=list[UserOut], dependencies=[Depends(auth.require_admin)])
+def list_users(db=Depends(get_db)):
+    rows = db.scalars(select(User).order_by(User.created_at)).all()
+    return [UserOut(username=settings.admin_user, role="admin", builtin=True), *rows]
+
+
+@api.post("/users", response_model=UserOut)
+def create_user(body: UserIn, db=Depends(get_db), admin: str = Depends(auth.require_admin)):
+    if body.username == settings.admin_user or db.get(User, body.username):
+        raise HTTPException(409, "That username is already taken.")
+    user = User(username=body.username, password_hash=settings_store.hash_password(body.password),
+                role=body.role, created_by=admin)
+    db.add(user)
+    audit(db, admin, "user_created", detail={"username": body.username, "role": body.role})
+    db.commit()
+    return user
+
+
+@api.delete("/users/{username}")
+def delete_user(username: str, db=Depends(get_db), admin: str = Depends(auth.require_admin)):
+    user = db.get(User, username)
+    if not user:
+        raise HTTPException(404, "User not found.")
+    db.delete(user)
+    audit(db, admin, "user_deleted", detail={"username": username})
+    db.commit()
+    return {"ok": True}
+
+
+@api.put("/users/{username}/role", response_model=UserOut)
+def set_user_role(username: str, body: RoleIn, db=Depends(get_db), admin: str = Depends(auth.require_admin)):
+    user = db.get(User, username)
+    if not user:
+        raise HTTPException(404, "User not found.")
+    if user.role != body.role:
+        audit(db, admin, "user_role_changed", detail={"username": username, "from": user.role, "to": body.role})
+        user.role = body.role
+    db.commit()
+    return user
+
+
+@api.put("/users/{username}/password")
+def reset_user_password(username: str, body: PasswordResetIn, db=Depends(get_db),
+                        admin: str = Depends(auth.require_admin)):
+    user = db.get(User, username)
+    if not user:
+        raise HTTPException(404, "User not found.")
+    user.password_hash = settings_store.hash_password(body.new)
+    audit(db, admin, "user_password_reset", detail={"username": username})
     db.commit()
     return {"ok": True}
 
@@ -341,7 +402,7 @@ def job_log_list(job_id: int, after: int = 0, limit: int = Query(1000, ge=1, le=
 
 @api.post("/jobs/{job_id}/approve", response_model=JobOut)
 def job_approve(job_id: int, lang: str = Query("", pattern="^(en|ko)?$"), db=Depends(get_db),
-                user: str = Depends(auth.require_user)):
+                user: str = Depends(auth.require_approver)):
     job = db.get(Job, job_id)
     if not job or job.status != "pending_approval":
         raise HTTPException(400, "This job cannot be approved in its current state.")
@@ -358,6 +419,8 @@ def job_cancel(job_id: int, db=Depends(get_db), user: str = Depends(auth.require
     job = db.get(Job, job_id)
     if not job or job.status not in ("pending_approval", "approved"):
         raise HTTPException(400, "This job cannot be cancelled in its current state.")
+    if job.created_by != user and not auth.can(user, "approver"):
+        raise HTTPException(403, "Only the requester or an approver can cancel this job.")
     job.status = "cancelled"
     audit(db, user, f"{job.kind}_cancelled", detail={"job": job.id})
     db.commit()

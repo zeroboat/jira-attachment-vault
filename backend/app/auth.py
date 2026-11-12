@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request, Response
 
 from . import settings_store
 from .config import settings
+from .db import SessionLocal, User
 
 COOKIE = "vault_session"
 _secret = settings.secret_key.encode()
@@ -45,11 +46,22 @@ def verify(token: str | None) -> str | None:
     return data.get("u")
 
 
+def is_admin(username: str) -> bool:
+    return secrets.compare_digest(username.encode(), settings.admin_user.encode())
+
+
+def _find(username: str) -> User | None:
+    with SessionLocal() as s:
+        return s.get(User, username)
+
+
 def check_password(username: str, password: str) -> bool:
-    if not settings.admin_password and not settings.admin_password_hash:
-        raise HTTPException(500, "ADMIN_PASSWORD is not set on the server.")
-    ok_user = secrets.compare_digest(username.encode(), settings.admin_user.encode())
-    return settings_store.check_password(password) and ok_user
+    if is_admin(username):
+        if not settings.admin_password and not settings.admin_password_hash:
+            raise HTTPException(500, "ADMIN_PASSWORD is not set on the server.")
+        return settings_store.check_password(password)
+    user = _find(username)
+    return bool(user) and settings_store.verify_hash(user.password_hash, password)
 
 
 def set_cookie(response: Response, username: str) -> None:
@@ -63,6 +75,36 @@ def clear_cookie(response: Response) -> None:
 
 def require_user(request: Request) -> str:
     user = verify(request.cookies.get(COOKIE))
-    if not user:
+    if not user or not (is_admin(user) or _find(user)):  # a deleted account's cookie stops working
         raise HTTPException(401, "Login required.")
     return user
+
+
+# viewer: look, download, request cleanups/restores, sync
+# approver: + approve and cancel jobs
+# admin: + settings (incl. dry run) and users
+ROLES = ("viewer", "approver", "admin")
+
+
+def role_of(username: str) -> str:
+    if is_admin(username):
+        return "admin"
+    user = _find(username)
+    return user.role if user and user.role in ROLES else "viewer"
+
+
+def can(username: str, role: str) -> bool:
+    return ROLES.index(role_of(username)) >= ROLES.index(role)
+
+
+def require_role(role: str):
+    def dep(request: Request) -> str:
+        user = require_user(request)
+        if not can(user, role):
+            raise HTTPException(403, "Your role doesn't allow this.")
+        return user
+    return dep
+
+
+require_approver = require_role("approver")
+require_admin = require_role("admin")

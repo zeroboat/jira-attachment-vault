@@ -165,6 +165,7 @@ class AppConfig(BaseModel):
     timezone: str
     storage_backend: str
     jira_configured: bool
+    role: str  # viewer | approver | admin
     lang: str  # app-wide UI language (also the Jira comment fallback), stored in the DB
 
 
@@ -232,6 +233,29 @@ class JiraTestIn(BaseModel):
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    username: str
+    role: str = "viewer"
+    builtin: bool = False
+    created_by: str | None = None
+    created_at: datetime | None = None
+
+
+class UserIn(BaseModel):
+    username: str = Field(pattern=r"^[A-Za-z0-9._@-]{2,64}$")
+    password: str = Field(min_length=8)
+    role: str = Field("viewer", pattern="^(viewer|approver|admin)$")
+
+
+class RoleIn(BaseModel):
+    role: str = Field(pattern="^(viewer|approver|admin)$")
+
+
+class PasswordResetIn(BaseModel):
+    new: str = Field(min_length=8)
 
 
 class PasswordIn(BaseModel):

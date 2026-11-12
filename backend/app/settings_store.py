@@ -119,11 +119,20 @@ def _hash(password: str, salt: bytes | None = None) -> str:
     return f"scrypt${salt.hex()}${digest.hex()}"
 
 
+def hash_password(password: str) -> str:
+    return _hash(password)
+
+
+def verify_hash(stored: str, password: str) -> bool:
+    _, salt, digest = stored.split("$")
+    return hmac.compare_digest(_hash(password, bytes.fromhex(salt)).split("$")[2], digest)
+
+
 def check_password(password: str) -> bool:
+    """The built-in admin's password."""
     stored = getattr(settings, "admin_password_hash", None)
     if stored:
-        _, salt, digest = stored.split("$")
-        return hmac.compare_digest(_hash(password, bytes.fromhex(salt)).split("$")[2], digest)
+        return verify_hash(stored, password)
     return bool(settings.admin_password) and secrets.compare_digest(password.encode(), settings.admin_password.encode())
 
 

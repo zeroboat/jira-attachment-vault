@@ -417,3 +417,49 @@ def test_periodic_sync_is_a_job(monkeypatch):
     with SessionLocal() as s:
         assert s.scalar(select(Job.id).order_by(Job.id.desc()).limit(1)) == jobs[0].id
         assert not s.scalars(select(JobLog).where(JobLog.job_id > jobs[0].id)).all()
+
+
+def test_users():
+    """(test_api changed the admin password to newpass123.) The built-in admin adds accounts; they log in with their own password and show up as actors."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as admin, TestClient(app) as bob:
+        assert admin.post("/api/auth/login", json={"username": "admin", "password": "newpass123"}).status_code == 200
+        assert admin.get("/api/config").json()["role"] == "admin"
+        assert admin.post("/api/users", json={"username": "bob", "password": "short"}).status_code == 422
+        assert admin.post("/api/users", json={"username": "admin", "password": "longenough"}).status_code == 409
+        assert admin.post("/api/users", json={"username": "bob", "password": "bob-pass-1"}).status_code == 200
+        assert admin.post("/api/users", json={"username": "bob", "password": "bob-pass-1"}).status_code == 409
+        assert [u["username"] for u in admin.get("/api/users").json()] == ["admin", "bob"]
+
+        assert bob.post("/api/auth/login", json={"username": "bob", "password": "wrong-pass"}).status_code == 401
+        assert bob.post("/api/auth/login", json={"username": "bob", "password": "bob-pass-1"}).status_code == 200
+        assert bob.get("/api/config").json()["user"] == "bob"
+        assert bob.get("/api/config").json()["role"] == "viewer"  # default role
+        assert bob.post("/api/users", json={"username": "eve", "password": "eve-pass-1"}).status_code == 403
+        assert bob.get("/api/users").status_code == 403
+        assert bob.put("/api/settings", json={"jira_comment_lang": "en"}).status_code == 200  # language is for everyone
+        assert bob.put("/api/settings", json={"dry_run": False}).status_code == 403
+        assert bob.post("/api/settings/test-jira", json={"jira_base_url": "", "jira_email": "", "jira_api_token": ""}).status_code == 403
+        job = bob.post("/api/cleanup/manual", json={"attachment_ids": ["101"]})
+        assert job.status_code == 200, job.text  # viewers may request
+        jid = job.json()["id"]
+        assert bob.post(f"/api/jobs/{jid}/approve").status_code == 403  # but not approve
+        assert admin.put("/api/users/bob/role", json={"role": "boss"}).status_code == 422
+        assert admin.put("/api/users/bob/role", json={"role": "approver"}).json()["role"] == "approver"
+        assert bob.post(f"/api/jobs/{jid}/cancel").status_code == 200
+        assert bob.put("/api/settings", json={"dry_run": False}).status_code == 403  # still admin-only
+        assert admin.put("/api/users/bob/role", json={"role": "admin"}).status_code == 200
+        assert bob.get("/api/users").status_code == 200
+        assert admin.put("/api/users/bob/role", json={"role": "viewer"}).status_code == 200
+        assert bob.delete("/api/users/bob").status_code == 403
+        # own password change is audited under bob
+        assert bob.post("/api/auth/password", json={"current": "bob-pass-1", "new": "bob-pass-2"}).status_code == 200
+        actors = {(a["actor"], a["action"]) for a in admin.get("/api/audit").json()}
+        assert ("bob", "password_changed") in actors and ("admin", "user_created") in actors
+
+        assert admin.put("/api/users/bob/password", json={"new": "reset-pass-3"}).status_code == 200
+        assert bob.post("/api/auth/login", json={"username": "bob", "password": "bob-pass-2"}).status_code == 401
+        assert admin.delete("/api/users/admin").status_code == 404
+        assert admin.delete("/api/users/bob").status_code == 200
+        assert bob.get("/api/config").status_code == 401  # deleted account's session is gone

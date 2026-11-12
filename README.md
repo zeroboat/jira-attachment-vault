@@ -10,6 +10,7 @@ A standalone web tool that **backs up Jira Cloud attachments to your own server*
 - **Restore**: re-upload cleaned-up attachments to their original issue.
 - **Job log**: every job keeps a step-by-step log (per file: backed up, deleted, skipped and why, failed, notice comments).
 - **Audit log**: who did what, and when.
+- **Users**: the admin account (from `.env`) adds a login for each person on the Settings page, so jobs and the audit log show who requested and approved what. Roles: **viewer** (browse, download, request cleanups/restores, sync), **approver** (+ approve and cancel jobs), **admin** (+ settings, dry run and users). Anyone can switch the UI language.
 - **Language**: the UI is English by default. Switch to Korean on the Settings page or from the user menu (top right). The choice is saved on the server, so every browser follows it. Before logging in, the login page uses the browser's language (or the switch below the form).
 
 ## Stack
@@ -112,7 +113,7 @@ and never sent back to the browser.
 |---|---|---|
 | `STORAGE_BACKEND` | `local` | `local`, `seaweedfs` or `s3` (see below) |
 | `WEB_PORT` | `8080` | Port the web UI listens on |
-| `ADMIN_USER` | `admin` | Login username |
+| `ADMIN_USER` | `admin` | Username of the built-in admin account (manages other users) |
 | `SESSION_HOURS` | `12` | Login session lifetime |
 | `COOKIE_SECURE` | `false` | Set `true` behind an HTTPS reverse proxy |
 | `DB_DIR` | `./data/postgres` | PostgreSQL data directory |
