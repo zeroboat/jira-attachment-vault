@@ -13,8 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/misc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, ApiError, type Settings } from "@/lib/api";
-import { useConfig } from "@/lib/config";
-import { lang, LANGS, setLang, t, type Lang } from "@/lib/i18n";
+import { chooseLang, useConfig } from "@/lib/config";
+import { lang, LANGS, t, type Lang } from "@/lib/i18n";
 
 /** Editable form state; numbers and lists are kept as strings while typing. */
 interface Form {
@@ -93,6 +93,8 @@ export function SettingsPage() {
     },
     onError: (e) => toast.error(errMsg(e)),
   });
+
+  const saveLang = useMutation({ mutationFn: chooseLang, onError: (e) => toast.error(errMsg(e)) });
 
   const test = useMutation({
     mutationFn: (f: Form) =>
@@ -243,7 +245,7 @@ export function SettingsPage() {
               <CardDescription>{t("settings.langDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={lang} onValueChange={(v) => v !== lang && setLang(v as Lang)}>
+              <Select value={lang} onValueChange={(v) => v !== lang && saveLang.mutate(v as Lang)} disabled={saveLang.isPending}>
                 <SelectTrigger className="bg-background w-full" aria-label={t("lang.label")}>
                   <SelectValue />
                 </SelectTrigger>

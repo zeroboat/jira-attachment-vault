@@ -10,7 +10,7 @@ A standalone web tool that **backs up Jira Cloud attachments to your own server*
 - **Restore**: re-upload cleaned-up attachments to their original issue.
 - **Job log**: every job keeps a step-by-step log (per file: backed up, deleted, skipped and why, failed, notice comments).
 - **Audit log**: who did what, and when.
-- **Language**: the UI is English by default. Switch to Korean on the Settings page, from the user menu (top right) or below the login form. The choice is stored in the browser.
+- **Language**: the UI is English by default. Switch to Korean on the Settings page or from the user menu (top right). The choice is saved on the server, so every browser follows it. Before logging in, the login page uses the browser's language (or the switch below the form).
 
 ## Stack
 

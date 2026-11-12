@@ -235,6 +235,9 @@ def test_api():
         assert raw.startswith("enc:") and "tok-123" not in raw
         assert c.get("/api/audit").json()[0]["action"] == "settings_changed"
         assert c.put("/api/settings", json={"jira_comment_lang": "fr"}).status_code == 422
+        assert c.put("/api/settings", json={"jira_comment_lang": "ko"}).status_code == 200
+        assert c.get("/api/config").json()["lang"] == "ko"  # UI language is shared via the DB
+        c.put("/api/settings", json={"jira_comment_lang": "en"})
         assert c.put("/api/settings", json={"jira_base_url": "http://x"}).status_code == 422
         assert c.put("/api/settings", json={"jira_user_timezone": "Mars/Base"}).status_code == 422
         assert not c.post("/api/settings/test-jira", json={"jira_base_url": "https://evil.example"}).json()["ok"]

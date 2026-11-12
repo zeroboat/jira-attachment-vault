@@ -1,5 +1,6 @@
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Archive, Check, Eraser, HardDrive, History, Languages, LayoutDashboard, ListChecks, LogOut, Paperclip, Settings, ShieldAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,8 +14,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/misc";
 import { api } from "@/lib/api";
-import { useConfig } from "@/lib/config";
-import { lang, LANGS, setLang, t, type Lang } from "@/lib/i18n";
+import { chooseLang, useConfig } from "@/lib/config";
+import { lang, LANGS, t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const STORAGE_LABEL: Record<string, string> = { local: t("storage.local"), seaweedfs: "SeaweedFS", s3: t("storage.s3") };
@@ -115,7 +116,7 @@ export function AppLayout() {
                 <Languages className="size-3.5" /> {t("lang.label")}
               </DropdownMenuLabel>
               {(Object.keys(LANGS) as Lang[]).map((l) => (
-                <DropdownMenuItem key={l} onSelect={() => l !== lang && setLang(l)}>
+                <DropdownMenuItem key={l} onSelect={() => l !== lang && chooseLang(l).catch(() => toast.error(t("common.requestFailed")))}>
                   <Check className={l === lang ? "" : "invisible"} /> {LANGS[l]}
                 </DropdownMenuItem>
               ))}

@@ -165,6 +165,7 @@ class AppConfig(BaseModel):
     timezone: str
     storage_backend: str
     jira_configured: bool
+    lang: str  # app-wide UI language (also the Jira comment fallback), stored in the DB
 
 
 class SettingsOut(BaseModel):

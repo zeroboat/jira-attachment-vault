@@ -1,5 +1,6 @@
 // Minimal i18n: English by default, Korean selectable from the user menu.
-// The choice lives in localStorage; switching reloads the page so module-level labels pick it up.
+// The language is an app setting in the DB (shared by every browser); localStorage caches it so the
+// first paint (and the login page) is already right. Switching reloads so module-level labels pick it up.
 // ponytail: reload-on-switch instead of a reactive store; add a context if live switching ever matters.
 
 const en = {
@@ -272,7 +273,7 @@ const en = {
   "action.password_changed": "Password changed",
 
   "settings.title": "Settings",
-  "settings.langDesc": "Display language for this browser.",
+  "settings.langDesc": "Display language for everyone using this app. Notice comments use the language of whoever approves the job.",
   "settings.desc": "Changes are saved to the database and apply right away, no restart needed.",
   "settings.welcome": "Connect to Jira to get started",
   "settings.welcomeHint": "Enter the Jira URL, account email and API token, test the connection, then save.",
@@ -637,7 +638,7 @@ const ko: Record<Key, string> = {
   "action.password_changed": "비밀번호 변경",
 
   "settings.title": "설정",
-  "settings.langDesc": "이 브라우저에서 쓰는 화면 언어예요.",
+  "settings.langDesc": "이 앱을 쓰는 모든 브라우저의 화면 언어예요. 안내 댓글은 작업을 승인한 사람의 언어로 써요.",
   "settings.desc": "바꾼 값은 DB에 저장되고 재시작 없이 바로 적용돼요.",
   "settings.welcome": "먼저 Jira를 연결하세요",
   "settings.welcomeHint": "Jira 주소, 계정 이메일, API 토큰을 넣고 연결 테스트를 한 뒤 저장하세요.",
@@ -741,7 +742,7 @@ function readLang(): Lang {
   } catch {
     /* storage blocked */
   }
-  return "en";
+  return navigator.language?.toLowerCase().startsWith("ko") ? "ko" : "en";
 }
 
 export const lang: Lang = readLang();
@@ -750,10 +751,12 @@ const dict: Record<Key, string> = DICTS[lang];
 document.title = dict["app.fullName"];
 
 export function setLang(next: Lang) {
+  if (next === lang || !(next in DICTS)) return;
   try {
     localStorage.setItem("lang", next);
+    if (localStorage.getItem("lang") !== next) return;
   } catch {
-    /* storage blocked */
+    return; // storage blocked: reloading would just come back in the old language (and loop)
   }
   location.reload();
 }

@@ -71,7 +71,7 @@ api = APIRouter(prefix="/api", dependencies=[Depends(auth.require_user)])
 def config(user: str = Depends(auth.require_user)):
     return AppConfig(user=user, dry_run=settings.dry_run, jira_base_url=settings.jira_base_url,
                      timezone=settings.jira_user_timezone, storage_backend=settings.storage_backend,
-                     jira_configured=settings_store.jira_configured())
+                     jira_configured=settings_store.jira_configured(), lang=settings.jira_comment_lang)
 
 
 # ---------- settings ----------

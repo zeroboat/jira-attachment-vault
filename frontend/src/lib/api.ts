@@ -125,6 +125,7 @@ export interface AppConfig {
   timezone: string;
   storage_backend: string;
   jira_configured: boolean;
+  lang: string;
 }
 
 export interface Settings {
