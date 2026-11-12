@@ -213,6 +213,13 @@ def test_api():
         log = c.get("/api/jobs/1/log").json()
         assert log and log[0]["event"] == "cleanup_started", log
         assert c.get(f"/api/jobs/1/log?after={log[-1]['id']}").json() == []
+        tail = c.get("/api/jobs/1/log?limit=2").json()  # latest lines, oldest first
+        assert [l["id"] for l in tail] == [l["id"] for l in log[-2:]] and tail[-1]["event"] == "job_done", tail
+        items = c.get("/api/jobs/1/items?page_size=2").json()
+        assert items["page"] == 1 and len(items["items"]) == 2 and items["pages"] == -(-items["total"] // 2), items
+        sizes = [a["size"] for a in items["items"]]
+        assert sizes == sorted(sizes, reverse=True)
+        assert c.get("/api/jobs/1/items?page=999&page_size=2").json()["page"] == items["pages"]
         assert c.post("/api/sync", json={"full": True}).status_code == 200
         assert c.post("/api/sync", json={}).status_code == 409
         assert c.get("/api/settings/storage-check").json() == {"ok": True}
@@ -350,6 +357,25 @@ if __name__ == "__main__":
     test_silent_comment_request()
     test_jql()
     print("ALL OK")
+
+
+def test_job_progress():
+    from app.db import job_log
+    from app.jobs import job_progress
+    with SessionLocal() as s:
+        job = Job(kind="sync", status="running", title="t", params={}, attachment_ids=[])
+        s.add(job)
+        s.commit()
+        assert job_progress(s, job.id) is None
+        job_log(s, job.id, "sync_started")
+        job_log(s, job.id, "sync_progress", issues=50)
+        s.commit()
+        assert job_progress(s, job.id) == {"phase": "sync", "done": 50, "total": None}
+        job_log(s, job.id, "backup_started", count=4)
+        for ev in ("backed_up", "backup_failed", "missing"):
+            job_log(s, job.id, ev)
+        s.commit()
+        assert job_progress(s, job.id) == {"phase": "backup", "done": 3, "total": 4}
 
 
 def test_job_outcome():

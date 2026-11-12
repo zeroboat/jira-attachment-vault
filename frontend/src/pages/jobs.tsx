@@ -1,15 +1,15 @@
 import { Link, useNavigate, useParams } from "react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Ban, ChevronLeft, CircleCheck, ListChecks, MessageSquare, Play, TriangleAlert } from "lucide-react";
+import { Ban, ChevronLeft, ChevronRight, CircleCheck, ListChecks, MessageSquare, Play, TriangleAlert } from "lucide-react";
 
 import { ConfirmButton, EmptyState, FileLink, IssueLink, JobStatusBadge, PageHeader, StateBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, ApiError, type Job, type JobLogLine } from "@/lib/api";
+import { api, ApiError, type Job, type JobLogLine, type JobProgress } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { label, reasonLabel, t, type Key } from "@/lib/i18n";
 import { cn, formatBytes, formatDate, formatNumber } from "@/lib/utils";
@@ -83,7 +83,7 @@ export function JobDetailPage() {
   const cancel = useMutation({ mutationFn: () => api.cancel(id), onSuccess: onDone(t("jobs.cancelled")), onError: onErr });
 
   if (isLoading || !data) return <Skeleton className="h-96" />;
-  const { job, items, total_bytes } = data;
+  const { job, total_bytes } = data;
   const isCleanup = job.kind === "cleanup";
 
   return (
@@ -135,6 +135,7 @@ export function JobDetailPage() {
           </CardHeader>
           <CardContent className="px-5">
             <JobStatusBadge status={job.status} />
+            {data.progress && <Progress p={data.progress} />}
             <div className="text-muted-foreground mt-3 grid gap-1 text-xs">
               <span>{t("jobs.requested", { who: job.created_by ?? "-", date: formatDate(job.created_at) })}</span>
               {job.approved_by && <span>{t("jobs.approvedBy", { who: job.approved_by })}</span>}
@@ -156,43 +157,86 @@ export function JobDetailPage() {
 
       <JobLogCard jobId={job.id} live={["approved", "running"].includes(job.status)} />
 
-      {items.length > 0 && (
-        <Card className="mt-4 gap-0 pb-3 [&>[data-slot=table-container]]:px-3">
-          <CardHeader className="pb-4">
-            <CardTitle>{t("jobs.targetAtts")}</CardTitle>
-            {job.attachment_count > items.length && <CardDescription>{t("jobs.topN", { n: items.length })}</CardDescription>}
-          </CardHeader>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("col.file")}</TableHead>
-                <TableHead>{t("col.issue")}</TableHead>
-                <TableHead>{t("col.uploaded")}</TableHead>
-                <TableHead className="text-right">{t("col.size")}</TableHead>
-                <TableHead>{t("jobs.currentState")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>
-                    <FileLink a={a} />
-                  </TableCell>
-                  <TableCell>
-                    <IssueLink issueKey={a.issue_key} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground tabular">{formatDate(a.created_at, false)}</TableCell>
-                  <TableCell className="tabular text-right font-medium">{formatBytes(a.size)}</TableCell>
-                  <TableCell>
-                    <StateBadge state={a.state} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
-      )}
+      {job.attachment_count > 0 && <JobItemsCard jobId={job.id} live={["approved", "running"].includes(job.status)} />}
     </>
+  );
+}
+
+/** Every target attachment, a page at a time (largest first). */
+function JobItemsCard({ jobId, live }: { jobId: number; live: boolean }) {
+  const [page, setPage] = useState(1);
+  const { data } = useQuery({
+    queryKey: ["jobItems", jobId, page],
+    queryFn: () => api.jobItems(jobId, page),
+    placeholderData: (prev) => prev,
+    refetchInterval: live ? 5000 : false, // states change as the job runs
+  });
+  if (!data) return null;
+  const items = data.items;
+  return (
+    <Card className="mt-4 gap-0 pb-3 [&>[data-slot=table-container]]:px-3">
+      <CardHeader className="pb-4">
+        <CardTitle>{t("jobs.targetAtts")}</CardTitle>
+        <CardDescription>{t("jobs.bySize", { n: formatNumber(data.total) })}</CardDescription>
+      </CardHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("col.file")}</TableHead>
+            <TableHead>{t("col.issue")}</TableHead>
+            <TableHead>{t("col.uploaded")}</TableHead>
+            <TableHead className="text-right">{t("col.size")}</TableHead>
+            <TableHead>{t("jobs.currentState")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((a) => (
+            <TableRow key={a.id}>
+              <TableCell>
+                <FileLink a={a} />
+              </TableCell>
+              <TableCell>
+                <IssueLink issueKey={a.issue_key} />
+              </TableCell>
+              <TableCell className="text-muted-foreground tabular">{formatDate(a.created_at, false)}</TableCell>
+              <TableCell className="tabular text-right font-medium">{formatBytes(a.size)}</TableCell>
+              <TableCell>
+                <StateBadge state={a.state} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {data.pages > 1 && (
+        <div className="flex items-center justify-end gap-2 px-5 pt-3 text-sm">
+          <span className="text-muted-foreground mr-2 tabular">{t("att.page", { page: data.page, pages: data.pages })}</span>
+          <Button variant="outline" size="sm" disabled={data.page <= 1} onClick={() => setPage(data.page - 1)}>
+            <ChevronLeft /> {t("att.prev")}
+          </Button>
+          <Button variant="outline" size="sm" disabled={data.page >= data.pages} onClick={() => setPage(data.page + 1)}>
+            {t("att.next")} <ChevronRight />
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Progress({ p }: { p: JobProgress }) {
+  if (p.total === null) return <div className="text-muted-foreground mt-3 text-xs">{t("progress.sync", { done: formatNumber(p.done) })}</div>;
+  const pct = p.total ? Math.min(100, Math.floor((p.done / p.total) * 100)) : 100;
+  return (
+    <div className="mt-3 grid gap-1.5">
+      <div className="flex justify-between text-xs">
+        <span>{t(`progress.${p.phase}` as Key)}</span>
+        <span className="tabular text-muted-foreground">
+          {formatNumber(p.done)} / {formatNumber(p.total)} · {pct}%
+        </span>
+      </div>
+      <div className="bg-muted h-2 overflow-hidden rounded-full" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className="bg-primary h-full transition-all" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -205,7 +249,9 @@ function logText(l: JobLogLine): string {
   return t(`log.${l.event}` as Key, d);
 }
 
-/** Step-by-step log written by the worker; polls while the job runs. */
+const LOG_LIMIT = 1000; // server default for /jobs/{id}/log
+
+/** Step-by-step log written by the worker (latest lines); polls while the job runs. */
 function JobLogCard({ jobId, live }: { jobId: number; live: boolean }) {
   const [problems, setProblems] = useState(false);
   const { data } = useQuery({
@@ -214,6 +260,10 @@ function JobLogCard({ jobId, live }: { jobId: number; live: boolean }) {
     refetchInterval: live ? 2000 : false,
   });
   const lines = (data ?? []).filter((l) => !problems || l.level !== "info");
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (live && box.current) box.current.scrollTop = box.current.scrollHeight; // follow new lines while running
+  }, [data, live]);
   return (
     <Card className="mt-4 gap-0 pb-3">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -223,7 +273,8 @@ function JobLogCard({ jobId, live }: { jobId: number; live: boolean }) {
           {t("log.problems")}
         </label>
       </CardHeader>
-      <CardContent className="max-h-[480px] overflow-auto px-5 font-mono text-xs">
+      {(data?.length ?? 0) >= LOG_LIMIT && <CardDescription className="px-5 pb-2">{t("log.tail", { n: formatNumber(LOG_LIMIT) })}</CardDescription>}
+      <CardContent ref={box} className="max-h-[480px] overflow-auto px-5 font-mono text-xs">
         {lines.length === 0 ? (
           <span className="text-muted-foreground">{t("log.empty")}</span>
         ) : (

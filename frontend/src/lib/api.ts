@@ -2,6 +2,12 @@
 import { lang } from "@/lib/i18n";
 
 export type AttachmentState = "active" | "deleted_by_vault" | "missing_in_jira" | "restored";
+export interface JobProgress {
+  phase: "sync" | "backup" | "cleanup" | "restore";
+  done: number;
+  total: number | null;
+}
+
 export type JobStatus = "pending_approval" | "approved" | "running" | "done" | "partial" | "failed" | "cancelled";
 export type JobKind = "cleanup" | "restore" | "sync" | "full_sync";
 
@@ -204,7 +210,8 @@ export const api = {
     request<Job>("POST", "/cleanup/manual", { attachment_ids: ids, skip_embedded: skipEmbedded }),
   jobs: () => request<Job[]>("GET", "/jobs"),
   jobLog: (id: number) => request<JobLogLine[]>("GET", `/jobs/${id}/log`),
-  job: (id: number) => request<{ job: Job; items: Attachment[]; total_bytes: number }>("GET", `/jobs/${id}`),
+  job: (id: number) => request<{ job: Job; total_bytes: number; progress: JobProgress | null }>("GET", `/jobs/${id}`),
+  jobItems: (id: number, page: number) => request<{ items: Attachment[]; total: number; page: number; pages: number }>("GET", `/jobs/${id}/items?page=${page}`),
   approve: (id: number) => request<Job>("POST", `/jobs/${id}/approve?lang=${lang}`),
   cancel: (id: number) => request<Job>("POST", `/jobs/${id}/cancel`),
   sync: (full: boolean) => request<Job>("POST", "/sync", { full }),

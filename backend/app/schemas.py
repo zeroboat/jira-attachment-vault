@@ -140,8 +140,8 @@ class CleanupPreview(BaseModel):
 
 class JobDetail(BaseModel):
     job: JobOut
-    items: list[AttachmentOut]
     total_bytes: int
+    progress: dict | None = None
 
 
 class ManualCleanupIn(BaseModel):

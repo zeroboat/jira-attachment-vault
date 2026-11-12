@@ -16,7 +16,7 @@ from .config import settings
 from .db import (ACTIVE, DELETED_BY_VAULT, MISSING_IN_JIRA, Attachment,
                  AuditLog, Job, JobLog, SessionLocal, audit, get_state, init_db)
 from .jira import JiraClient, JiraError
-from .jobs import (Policy, candidates_query, candidates_summary,
+from .jobs import (Policy, job_progress, candidates_query, candidates_summary,
                    create_cleanup_job, create_manual_cleanup_job, create_restore_job)
 from .schemas import (AppConfig, AttachmentDetail, AttachmentOut, AuditOut,
                       CleanupPreview, Dashboard, JobDetail, JobLogOut, JobOut, LoginIn,
@@ -308,17 +308,35 @@ def job_detail(job_id: int, db=Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found.")
     ids = job.attachment_ids or []
-    items = db.scalars(select(Attachment).where(Attachment.id.in_(ids[:2000]))
-                       .order_by(Attachment.size.desc()).limit(500)).all() if ids else []
     total = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0))
                       .where(Attachment.id.in_(ids))) if ids else 0
-    return JobDetail(job=job_out(job), items=items, total_bytes=int(total or 0))
+    return JobDetail(job=job_out(job), total_bytes=int(total or 0),
+                     progress=job_progress(db, job.id) if job.status in ("approved", "running") else None)
+
+
+@api.get("/jobs/{job_id}/items", response_model=Page)
+def job_items(job_id: int, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200), db=Depends(get_db)):
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found.")
+    ids = job.attachment_ids or []
+    total = len(ids)
+    pages = max(1, math.ceil(total / page_size))
+    page = min(page, pages)
+    items = db.scalars(select(Attachment).where(Attachment.id.in_(ids))
+                       .order_by(Attachment.size.desc(), Attachment.id)
+                       .offset((page - 1) * page_size).limit(page_size)).all() if ids else []
+    return Page(items=items, total=total, page=page, pages=pages)
 
 
 @api.get("/jobs/{job_id}/log", response_model=list[JobLogOut])
 def job_log_list(job_id: int, after: int = 0, limit: int = Query(1000, ge=1, le=5000), db=Depends(get_db)):
-    return db.scalars(select(JobLog).where(JobLog.job_id == job_id, JobLog.id > after)
-                      .order_by(JobLog.id).limit(limit)).all()
+    """after=0: the latest `limit` lines (oldest first). after=N: up to `limit` lines following line N."""
+    if after:
+        return db.scalars(select(JobLog).where(JobLog.job_id == job_id, JobLog.id > after)
+                          .order_by(JobLog.id).limit(limit)).all()
+    return list(reversed(db.scalars(select(JobLog).where(JobLog.job_id == job_id)
+                                    .order_by(JobLog.id.desc()).limit(limit)).all()))
 
 
 @api.post("/jobs/{job_id}/approve", response_model=JobOut)

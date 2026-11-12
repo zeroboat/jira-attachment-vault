@@ -10,7 +10,7 @@ from datetime import timedelta
 from sqlalchemy import Select, func, select
 
 from .config import settings
-from .db import (ACTIVE, DELETED_BY_VAULT, RESTORED, Attachment, Job, audit,
+from .db import (ACTIVE, DELETED_BY_VAULT, RESTORED, Attachment, Job, JobLog, audit,
                  job_log, utcnow)
 from .jira import JiraClient, JiraError
 from .notice import cleanup_comment, post_notices, restore_comment
@@ -236,6 +236,30 @@ def run_restore(session, client: JiraClient, storage: Storage, job: Job) -> dict
                          for iid, items in restored_by_issue.items())
     res["comments"] = post_notices(session, client, groups, job.approved_by or "system", job.id)
     return res
+
+
+# Which log events finish one item, per phase (keyed by the phase's start event).
+_PHASE_ITEMS = {
+    "cleanup_started": ("skipped", "would_delete", "deleted", "failed"),
+    "restore_started": ("restored", "failed"),
+    "backup_started": ("backed_up", "backup_failed", "missing"),
+}
+
+
+def job_progress(session, job_id: int) -> dict | None:
+    """{phase, done, total} from the job log. In the sync phase total is unknown (None) and done = issues seen."""
+    start = session.scalars(select(JobLog).where(JobLog.job_id == job_id, JobLog.event.in_(
+        [*_PHASE_ITEMS, "sync_started"])).order_by(JobLog.id.desc()).limit(1)).first()
+    if start is None:
+        return None
+    if start.event == "sync_started":
+        last = session.scalars(select(JobLog).where(JobLog.job_id == job_id, JobLog.event == "sync_progress")
+                               .order_by(JobLog.id.desc()).limit(1)).first()
+        return {"phase": "sync", "done": (last.data or {}).get("issues", 0) if last else 0, "total": None}
+    done = session.scalar(select(func.count()).where(JobLog.job_id == job_id, JobLog.id > start.id,
+                                                     JobLog.event.in_(_PHASE_ITEMS[start.event])))
+    return {"phase": start.event.removesuffix("_started"), "done": done,
+            "total": (start.data or {}).get("count", 0)}
 
 
 def _outcome(result: dict) -> str:
