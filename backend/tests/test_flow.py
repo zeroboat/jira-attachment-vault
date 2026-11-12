@@ -352,6 +352,15 @@ if __name__ == "__main__":
     print("ALL OK")
 
 
+def test_job_outcome():
+    from app.jobs import _outcome
+    assert _outcome({"deleted": 3, "failed": 0}) == "done"
+    assert _outcome({"deleted": 2, "failed": 1}) == "partial"
+    assert _outcome({"deleted": 0, "failed": 2}) == "failed"  # e.g. no Delete all attachments permission
+    assert _outcome({"restored": 0, "failed": 0}) == "done"
+    assert _outcome({"sync": {}, "backup": {"ok": 0, "failed": 4}}) == "failed"
+
+
 def test_periodic_sync_is_a_job(monkeypatch):
     """The worker's interval sync runs as a job with a log; a cycle where nothing happened leaves no job."""
     from sqlalchemy import select

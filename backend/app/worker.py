@@ -45,7 +45,7 @@ def tick(storage, last_cycle: float) -> float:
         s.add(job)
         s.commit()
         run_job(s, client, storage, job)
-        if job.status == "failed":
+        if job.status == "failed" and "error" in job.result:
             set_state(s, "last_error", f"{utcnow().isoformat()} {job.result['error']}"[:2000])
         else:
             set_state(s, "last_error", None)

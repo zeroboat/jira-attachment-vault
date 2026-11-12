@@ -55,6 +55,7 @@ const en = {
   "jobStatus.approved": "Queued",
   "jobStatus.running": "Running",
   "jobStatus.done": "Done",
+  "jobStatus.partial": "Done with errors",
   "jobStatus.failed": "Failed",
   "jobStatus.cancelled": "Cancelled",
 
@@ -414,6 +415,7 @@ const ko: Record<Key, string> = {
   "jobStatus.approved": "대기열",
   "jobStatus.running": "실행 중",
   "jobStatus.done": "완료",
+  "jobStatus.partial": "일부 실패",
   "jobStatus.failed": "실패",
   "jobStatus.cancelled": "취소",
 

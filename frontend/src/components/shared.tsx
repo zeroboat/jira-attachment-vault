@@ -50,7 +50,7 @@ export function BackupBadge({ a }: { a: Pick<Attachment, "sha256" | "backup_erro
 
 export function JobStatusBadge({ status }: { status: JobStatus }) {
   const variant = (
-    { pending_approval: "warning", approved: "info", running: "info", done: "success", failed: "destructive", cancelled: "secondary" } as const
+    { pending_approval: "warning", approved: "info", running: "info", done: "success", partial: "warning", failed: "destructive", cancelled: "secondary" } as const
   )[status];
   return (
     <Badge variant={variant}>

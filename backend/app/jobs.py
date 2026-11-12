@@ -238,6 +238,14 @@ def run_restore(session, client: JiraClient, storage: Storage, job: Job) -> dict
     return res
 
 
+def _outcome(result: dict) -> str:
+    """done | partial (some items failed) | failed (items failed and none succeeded)."""
+    parts = [result["backup"]] if "backup" in result else [result]
+    failed = sum(p.get("failed", 0) for p in parts)
+    ok = sum(p.get("deleted", 0) + p.get("restored", 0) + p.get("ok", 0) for p in parts)
+    return "done" if not failed else "partial" if ok else "failed"
+
+
 def run_job(session, client: JiraClient, storage: Storage, job: Job) -> None:
     job.status = "running"
     job.started_at = utcnow()
@@ -253,7 +261,7 @@ def run_job(session, client: JiraClient, storage: Storage, job: Job) -> None:
                       "backup": backup_pending(session, client, storage, job_id=job.id)}
         else:
             raise ValueError(f"Unknown job kind: {job.kind}")
-        job.status = "done"
+        job.status = _outcome(result)
         job.result = result
         job_log(session, job.id, "job_done")
     except Exception as exc:  # noqa: BLE001

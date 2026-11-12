@@ -2,7 +2,7 @@
 import { lang } from "@/lib/i18n";
 
 export type AttachmentState = "active" | "deleted_by_vault" | "missing_in_jira" | "restored";
-export type JobStatus = "pending_approval" | "approved" | "running" | "done" | "failed" | "cancelled";
+export type JobStatus = "pending_approval" | "approved" | "running" | "done" | "partial" | "failed" | "cancelled";
 export type JobKind = "cleanup" | "restore" | "sync" | "full_sync";
 
 export interface Attachment {
