@@ -115,6 +115,7 @@ API 토큰은 `SECRET_KEY`로 암호화해 저장하고, 브라우저로 다시 
 | `SESSION_HOURS` | `12` | 로그인 유지 시간 |
 | `COOKIE_SECURE` | `false` | HTTPS 리버스 프록시 뒤에 둘 때 `true` |
 | `DB_DIR` | `./data/postgres` | PostgreSQL 데이터 경로 |
+| `TZ` | `UTC` | 컨테이너 로그 시간대 (예: `Asia/Seoul`). 웹 화면과 Jira 댓글 시각은 설정 탭의 시간대를 따라요 |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | | `seaweedfs` / `s3` 모드에서 필수 |
 | `S3_BUCKET` | `jira-attachments` | 버킷 이름 |
 | `S3_PREFIX` | | 버킷 안 키 접두어 (선택) |

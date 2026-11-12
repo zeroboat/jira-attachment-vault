@@ -116,6 +116,7 @@ and never sent back to the browser.
 | `SESSION_HOURS` | `12` | Login session lifetime |
 | `COOKIE_SECURE` | `false` | Set `true` behind an HTTPS reverse proxy |
 | `DB_DIR` | `./data/postgres` | PostgreSQL data directory |
+| `TZ` | `UTC` | Timezone for container logs, e.g. `Asia/Seoul`. The web UI and Jira comments use the Settings page timezone |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | | Required for `seaweedfs` / `s3` |
 | `S3_BUCKET` | `jira-attachments` | Bucket name |
 | `S3_PREFIX` | | Optional key prefix inside the bucket |
