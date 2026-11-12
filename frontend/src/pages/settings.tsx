@@ -159,12 +159,22 @@ export function SettingsPage() {
                 <Input value={form.jira_projects} onChange={(e) => set({ jira_projects: e.target.value })} placeholder="OPS, DEV" />
               </Field>
               <Field label={t("settings.timezone")} hint={t("settings.timezoneHint")}>
-                <Input list="tz-list" value={form.jira_user_timezone} onChange={(e) => set({ jira_user_timezone: e.target.value })} />
-                <datalist id="tz-list">
-                  {TIMEZONES.map((z) => (
-                    <option key={z} value={z} />
-                  ))}
-                </datalist>
+                {TIMEZONES.length ? (
+                  <Select value={form.jira_user_timezone} onValueChange={(v) => set({ jira_user_timezone: v })}>
+                    <SelectTrigger className="bg-background w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {[...new Set(["UTC", "Asia/Seoul", form.jira_user_timezone, ...TIMEZONES])].filter(Boolean).map((z) => (
+                        <SelectItem key={z} value={z}>
+                          {z}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input value={form.jira_user_timezone} onChange={(e) => set({ jira_user_timezone: e.target.value })} />
+                )}
               </Field>
               <Field label={t("settings.jql")} hint={t("settings.jqlHint")} className="sm:col-span-2">
                 <Input value={form.jira_extra_jql} onChange={(e) => set({ jira_extra_jql: e.target.value })} placeholder="issuetype != Epic" />
